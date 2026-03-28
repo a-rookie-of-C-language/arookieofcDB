@@ -1,4 +1,4 @@
-﻿const DEFAULT_ORDER: usize = 4;
+const DEFAULT_ORDER: usize = 4;
 
 #[derive(Debug, Clone)]
 enum Node {
@@ -138,7 +138,12 @@ impl BPlusTree {
         self.order - 1
     }
 
-    fn insert_recursive(&mut self, node_id: usize, key: i64, value: Vec<u8>) -> Option<(i64, usize)> {
+    fn insert_recursive(
+        &mut self,
+        node_id: usize,
+        key: i64,
+        value: Vec<u8>,
+    ) -> Option<(i64, usize)> {
         let is_leaf = matches!(self.nodes[node_id], Node::Leaf(_));
 
         if is_leaf {
@@ -148,7 +153,12 @@ impl BPlusTree {
         }
     }
 
-    fn insert_into_leaf(&mut self, leaf_id: usize, key: i64, value: Vec<u8>) -> Option<(i64, usize)> {
+    fn insert_into_leaf(
+        &mut self,
+        leaf_id: usize,
+        key: i64,
+        value: Vec<u8>,
+    ) -> Option<(i64, usize)> {
         let max_keys = self.max_keys();
 
         let leaf = match &mut self.nodes[leaf_id] {
@@ -196,7 +206,12 @@ impl BPlusTree {
         Some((promoted_key, right_id))
     }
 
-    fn insert_into_internal(&mut self, node_id: usize, key: i64, value: Vec<u8>) -> Option<(i64, usize)> {
+    fn insert_into_internal(
+        &mut self,
+        node_id: usize,
+        key: i64,
+        value: Vec<u8>,
+    ) -> Option<(i64, usize)> {
         let child_index = match &self.nodes[node_id] {
             Node::Internal(internal) => child_index_for_key(&internal.keys, key),
             Node::Leaf(_) => return None,
