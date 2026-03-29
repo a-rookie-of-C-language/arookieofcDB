@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::key_codec::KeyEncoding;
 
-use super::{EngineStats, MemoryStore, StorageEngine, SyncPolicy, TtlState, WalStore};
+use super::{EngineStats, FaultTarget, MemoryStore, RepairSummary, StorageEngine, SyncPolicy, TtlState, WalStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CachePolicy {
@@ -36,6 +36,7 @@ pub struct HybridStore {
     stats: EngineStats,
     strict_read_check: bool,
     cache_policy: CachePolicy,
+    last_repair_summary: Option<RepairSummary>,
 }
 
 impl HybridStore {
@@ -59,6 +60,7 @@ impl HybridStore {
             stats: EngineStats::default(),
             strict_read_check,
             cache_policy,
+            last_repair_summary: None,
         })
     }
 
@@ -306,9 +308,30 @@ impl StorageEngine for HybridStore {
             }
         }
 
+        self.last_repair_summary = Some(RepairSummary {
+            target: report.target,
+            repaired_only_in_cache: report.repaired_only_in_cache,
+            repaired_only_in_disk: report.repaired_only_in_disk,
+            repaired_value_mismatches: report.repaired_value_mismatches,
+        });
+
         Ok(report)
     }
+    fn inject_fault(
+        &mut self,
+        target: FaultTarget,
+        key: KeyEncoding,
+        value: Vec<u8>,
+    ) -> io::Result<()> {
+        match target {
+            FaultTarget::CacheOnly => self.memory.set(key, value),
+            FaultTarget::DiskOnly => self.wal.set(key, value),
+        }
+    }
 
+    fn last_repair_summary(&self) -> Option<RepairSummary> {
+        self.last_repair_summary
+    }
     fn expire(&mut self, key: &KeyEncoding, seconds: u64) -> io::Result<bool> {
         let changed = self.wal.expire(key, seconds)?;
         if changed {
@@ -572,7 +595,43 @@ mod tests {
         assert_eq!(report_after.total_issues(), 0);
 
         cleanup(&wal_path);
+    }    #[test]
+    fn fault_cache_only_creates_only_in_cache_issue() {
+        let wal_path = unique_wal_path();
+        let key = KeyEncoding::Raw("fault:cache".to_string());
+
+        let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+        store
+            .inject_fault(
+                super::super::FaultTarget::CacheOnly,
+                key.clone(),
+                b"v".to_vec(),
+            )
+            .expect("inject cache-only");
+
+        let report = store.verify_consistency().expect("verify");
+        assert_eq!(report.only_in_cache, 1);
+
+        cleanup(&wal_path);
+    }
+
+    #[test]
+    fn fault_disk_only_creates_only_in_disk_issue() {
+        let wal_path = unique_wal_path();
+        let key = KeyEncoding::Raw("fault:disk".to_string());
+
+        let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+        store
+            .inject_fault(
+                super::super::FaultTarget::DiskOnly,
+                key.clone(),
+                b"v".to_vec(),
+            )
+            .expect("inject disk-only");
+
+        let report = store.verify_consistency().expect("verify");
+        assert_eq!(report.only_in_disk, 1);
+
+        cleanup(&wal_path);
     }
 }
-
-

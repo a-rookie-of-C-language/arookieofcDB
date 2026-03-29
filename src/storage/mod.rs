@@ -59,6 +59,12 @@ pub enum RepairTarget {
     Cache,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaultTarget {
+    CacheOnly,
+    DiskOnly,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepairReport {
     pub target: RepairTarget,
@@ -68,6 +74,20 @@ pub struct RepairReport {
 }
 
 impl RepairReport {
+    pub fn total_repairs(&self) -> usize {
+        self.repaired_only_in_cache + self.repaired_only_in_disk + self.repaired_value_mismatches
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepairSummary {
+    pub target: RepairTarget,
+    pub repaired_only_in_cache: usize,
+    pub repaired_only_in_disk: usize,
+    pub repaired_value_mismatches: usize,
+}
+
+impl RepairSummary {
     pub fn total_repairs(&self) -> usize {
         self.repaired_only_in_cache + self.repaired_only_in_disk + self.repaired_value_mismatches
     }
@@ -116,6 +136,22 @@ pub trait StorageEngine {
             io::ErrorKind::Unsupported,
             "consistency repair is not supported by this engine",
         ))
+    }
+
+    fn inject_fault(
+        &mut self,
+        _target: FaultTarget,
+        _key: KeyEncoding,
+        _value: Vec<u8>,
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "fault injection is not supported by this engine",
+        ))
+    }
+
+    fn last_repair_summary(&self) -> Option<RepairSummary> {
+        None
     }
 
     fn expire(&mut self, _key: &KeyEncoding, _seconds: u64) -> io::Result<bool> {

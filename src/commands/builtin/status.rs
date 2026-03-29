@@ -1,7 +1,7 @@
 ﻿use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
-use crate::storage::SyncPolicy;
+use crate::storage::{RepairTarget, SyncPolicy};
 
 use super::utils::{file_mtime_unix_opt, file_size_or_zero_opt};
 
@@ -60,8 +60,58 @@ impl Command for StatusCommand {
             .map(|v| v.to_string())
             .unwrap_or_else(|| String::from("none"));
 
+        let (
+            inconsistency_total,
+            inconsistency_only_in_cache,
+            inconsistency_only_in_disk,
+            inconsistency_value_mismatch,
+        ) = match ctx.store.verify_consistency() {
+            Ok(report) => (
+                report.total_issues().to_string(),
+                report.only_in_cache.to_string(),
+                report.only_in_disk.to_string(),
+                report.value_mismatches.to_string(),
+            ),
+            Err(err) if err.kind() == io::ErrorKind::Unsupported => (
+                String::from("none"),
+                String::from("none"),
+                String::from("none"),
+                String::from("none"),
+            ),
+            Err(err) => return Err(err),
+        };
+
+        let (
+            last_repair_target,
+            last_repair_total,
+            last_repair_only_in_cache,
+            last_repair_only_in_disk,
+            last_repair_value_mismatch,
+        ) = match ctx.store.last_repair_summary() {
+            Some(summary) => {
+                let target = match summary.target {
+                    RepairTarget::Disk => "disk",
+                    RepairTarget::Cache => "cache",
+                };
+                (
+                    target.to_string(),
+                    summary.total_repairs().to_string(),
+                    summary.repaired_only_in_cache.to_string(),
+                    summary.repaired_only_in_disk.to_string(),
+                    summary.repaired_value_mismatches.to_string(),
+                )
+            }
+            None => (
+                String::from("none"),
+                String::from("none"),
+                String::from("none"),
+                String::from("none"),
+                String::from("none"),
+            ),
+        };
+
         Ok(CommandOutput::message(format!(
-            "engine={}, len={}, syncmode={}, cache_policy={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}, reads={}, writes={}, deletes={}, cache_hits={}, cache_misses={}, disk_reads={}, disk_writes={}, wal_appends={}, fsync_count={}, ttl_expired_in_cache={}, ttl_expired_on_disk={}, cache_repaired={}, cache_invalidated={}, cache_evictions={}, cache_max_keys={}, cache_current_keys={}",
+            "engine={}, len={}, syncmode={}, cache_policy={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}, reads={}, writes={}, deletes={}, cache_hits={}, cache_misses={}, disk_reads={}, disk_writes={}, wal_appends={}, fsync_count={}, ttl_expired_in_cache={}, ttl_expired_on_disk={}, cache_repaired={}, cache_invalidated={}, cache_evictions={}, cache_max_keys={}, cache_current_keys={}, inconsistency_total={}, inconsistency_only_in_cache={}, inconsistency_only_in_disk={}, inconsistency_value_mismatch={}, last_repair_target={}, last_repair_total={}, last_repair_only_in_cache={}, last_repair_only_in_disk={}, last_repair_value_mismatch={}",
             ctx.store.engine_name(),
             ctx.store.len(),
             mode,
@@ -87,9 +137,17 @@ impl Command for StatusCommand {
             stats.cache_evictions,
             cache_max_keys,
             cache_current_keys,
+            inconsistency_total,
+            inconsistency_only_in_cache,
+            inconsistency_only_in_disk,
+            inconsistency_value_mismatch,
+            last_repair_target,
+            last_repair_total,
+            last_repair_only_in_cache,
+            last_repair_only_in_disk,
+            last_repair_value_mismatch,
         )))
     }
 }
 
 crate::submit_command!(StatusCommand);
-

@@ -23,3 +23,6 @@ mod delete;
 mod verify;
 mod repair;
 
+
+mod fault;
+

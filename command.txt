@@ -112,3 +112,37 @@ repair --to disk
 verify
 repair --to cache
 verify
+
+# 11) status 一致性健康度
+engine hybrid
+status
+# 关注: inconsistency_total / inconsistency_only_in_cache / inconsistency_only_in_disk / inconsistency_value_mismatch
+verify
+repair --to cache
+status
+
+# 12) 最近修复摘要（last_repair_*）
+engine hybrid
+verify
+status
+repair --to cache
+status
+# 关注: last_repair_target/last_repair_total/last_repair_only_in_cache/last_repair_only_in_disk/last_repair_value_mismatch
+
+# 13) 故障注入演示（fault）
+engine hybrid
+set demo:key base
+fault cache-only demo:key cache_v
+verify
+status
+repair --to disk
+verify
+status
+
+set demo2:key base
+fault disk-only demo2:key disk_v
+verify
+status
+repair --to cache
+verify
+status
