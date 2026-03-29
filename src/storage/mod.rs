@@ -25,6 +25,35 @@ pub enum TtlState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairMode {
+    Off,
+    Read,
+    Write,
+    Always,
+}
+
+impl RepairMode {
+    pub fn from_input(raw: &str) -> Option<Self> {
+        match raw.to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "read" => Some(Self::Read),
+            "write" => Some(Self::Write),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Always => "always",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConsistencyDiffKind {
     OnlyInCache,
     OnlyInDisk,
@@ -109,6 +138,9 @@ pub struct EngineStats {
     pub cache_repaired: u64,
     pub cache_invalidated: u64,
     pub cache_evictions: u64,
+    pub auto_repairs: u64,
+    pub auto_repairs_read: u64,
+    pub auto_repairs_write: u64,
 }
 
 pub trait StorageEngine {
@@ -148,6 +180,17 @@ pub trait StorageEngine {
             io::ErrorKind::Unsupported,
             "fault injection is not supported by this engine",
         ))
+    }
+
+    fn set_repair_mode(&mut self, _mode: RepairMode) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "repair mode is not supported by this engine",
+        ))
+    }
+
+    fn repair_mode(&self) -> Option<RepairMode> {
+        None
     }
 
     fn last_repair_summary(&self) -> Option<RepairSummary> {
@@ -217,3 +260,7 @@ pub trait StorageEngine {
 
 #[cfg(test)]
 mod consistency_tests;
+
+
+
+

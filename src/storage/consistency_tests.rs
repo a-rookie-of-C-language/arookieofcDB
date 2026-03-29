@@ -223,3 +223,105 @@ fn wal_expired_while_down_remains_expired_after_restart() {
 
     cleanup(&wal_path);
 }
+
+#[test]
+fn hybrid_get_and_disk_read_stay_consistent_after_update_and_delete() {
+    let wal_path = unique_wal_path("hybrid-read-order");
+    let key = KeyEncoding::Raw("hy:order:1".to_string());
+
+    let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+
+    store.set(key.clone(), s("v1")).expect("set v1");
+    assert_eq!(decoded(&mut store, &key), Some("v1".to_string()));
+    assert_eq!(
+        store
+            .get_disk_only(&key)
+            .map(|v| StringEncoding::decode(&v).to_display_string()),
+        Some("v1".to_string())
+    );
+
+    store.set(key.clone(), s("v2")).expect("set v2");
+    assert_eq!(decoded(&mut store, &key), Some("v2".to_string()));
+    assert_eq!(
+        store
+            .get_disk_only(&key)
+            .map(|v| StringEncoding::decode(&v).to_display_string()),
+        Some("v2".to_string())
+    );
+
+    store.delete(&key).expect("delete key");
+    assert_eq!(decoded(&mut store, &key), None);
+    assert_eq!(store.get_disk_only(&key), None);
+
+    cleanup(&wal_path);
+}
+
+#[test]
+fn hybrid_cache_miss_backfills_from_disk_consistently() {
+    let wal_path = unique_wal_path("hybrid-backfill");
+    let key = KeyEncoding::Raw("hy:miss:1".to_string());
+
+    let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+    store.set_cache_policy("none").expect("set none");
+    store.set(key.clone(), s("from-disk")).expect("set key");
+    assert_eq!(store.cache_current_keys(), Some(0));
+
+    store.set_cache_policy("lru").expect("set lru");
+
+    assert_eq!(decoded(&mut store, &key), Some("from-disk".to_string()));
+    assert_eq!(store.cache_current_keys(), Some(1));
+    assert_eq!(
+        store
+            .get_disk_only(&key)
+            .map(|v| StringEncoding::decode(&v).to_display_string()),
+        Some("from-disk".to_string())
+    );
+
+    cleanup(&wal_path);
+}
+
+#[test]
+fn hybrid_ttl_is_persisted_across_restart() {
+    let wal_path = unique_wal_path("hybrid-ttl-restart");
+    let key = KeyEncoding::Raw("ttl:hybrid".to_string());
+
+    {
+        let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+        store.set(key.clone(), s("v")).expect("set");
+        assert!(store.expire(&key, 30).expect("expire"));
+    }
+
+    {
+        let mut restarted = HybridStore::open(&wal_path).expect("reopen hybrid");
+        assert_eq!(decoded(&mut restarted, &key), Some("v".to_string()));
+        match restarted.ttl(&key).expect("ttl after restart") {
+            TtlState::Seconds(sec) => assert!(sec >= 1),
+            other => panic!("unexpected ttl state: {other:?}"),
+        }
+    }
+
+    cleanup(&wal_path);
+}
+
+#[test]
+fn hybrid_expired_while_down_remains_expired_after_restart() {
+    let wal_path = unique_wal_path("hybrid-ttl-down");
+    let key = KeyEncoding::Raw("ttl:hy-down".to_string());
+
+    {
+        let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+        store.set(key.clone(), s("v")).expect("set");
+        assert!(store.expire(&key, 1).expect("expire"));
+        store.sync().expect("sync");
+    }
+
+    thread::sleep(Duration::from_millis(1100));
+
+    {
+        let mut restarted = HybridStore::open(&wal_path).expect("reopen hybrid");
+        assert_eq!(decoded(&mut restarted, &key), None);
+        assert_eq!(restarted.ttl(&key).expect("ttl"), TtlState::NotFound);
+    }
+
+    cleanup(&wal_path);
+}

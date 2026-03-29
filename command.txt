@@ -146,3 +146,82 @@ status
 repair --to cache
 verify
 status
+
+# 14) repairmode 自动修复模式
+engine hybrid
+repairmode
+repairmode read
+fault cache-only auto:key stale
+get auto:key
+verify
+status
+repairmode off
+status
+
+# 15) hybrid: update/delete 后 get 与 disk 一致（不读旧值）
+engine hybrid
+set hy:order:1 v1
+get hy:order:1
+select --disk hy:order:1
+set hy:order:1 v2
+get hy:order:1
+select --disk hy:order:1
+del hy:order:1
+get hy:order:1
+select --disk hy:order:1
+# 预期: get 与 select --disk 全程一致，删除后都为 (nil)
+
+# 16) hybrid: cache miss 回源并回填一致
+engine hybrid
+cachepolicy none
+set hy:miss:1 from-disk
+status
+# 预期: cache_current_keys=0
+cachepolicy lru
+get hy:miss:1
+status
+select --disk hy:miss:1
+# 预期: get 与 disk 一致，且回填后 cache_current_keys=1
+
+# 17) hybrid: TTL 重启后仍保留（未过期）
+engine hybrid
+set ttl:hybrid v
+expire ttl:hybrid 30
+ttl ttl:hybrid
+status
+# 现在退出并重启后继续：
+# engine hybrid
+# get ttl:hybrid
+# ttl ttl:hybrid
+# 预期: get 有值，ttl 为 Seconds
+
+# 18) hybrid: 停机期间过期，重启后仍过期
+engine hybrid
+set ttl:hy-down v
+expire ttl:hy-down 1
+status
+# 现在退出，等待 2 秒，再重启后继续：
+# engine hybrid
+# get ttl:hy-down
+# ttl ttl:hy-down
+# 预期: get=(nil), ttl=NotFound
+
+# 19) repairmode write/always（写路径自动修复）
+engine hybrid
+repairmode write
+fault disk-only rmw:ghost v
+verify
+set rmw:trigger x
+verify
+status
+# 预期: set 触发写侧自动修复，verify 回到 0，auto_repairs 增加
+
+engine hybrid
+repairmode always
+fault cache-only rma:ghost stale
+get rma:ghost
+verify
+set rma:trigger y
+verify
+status
+# 预期: always = read + write，读/写都可触发自动修复

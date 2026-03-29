@@ -54,6 +54,11 @@ impl Command for StatusCommand {
             .cache_current_keys()
             .map(|v| v.to_string())
             .unwrap_or_else(|| String::from("none"));
+        let repair_mode = ctx
+            .store
+            .repair_mode()
+            .map(|v| v.as_str().to_string())
+            .unwrap_or_else(|| String::from("none"));
         let cache_policy = ctx
             .store
             .cache_policy()
@@ -111,11 +116,12 @@ impl Command for StatusCommand {
         };
 
         Ok(CommandOutput::message(format!(
-            "engine={}, len={}, syncmode={}, cache_policy={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}, reads={}, writes={}, deletes={}, cache_hits={}, cache_misses={}, disk_reads={}, disk_writes={}, wal_appends={}, fsync_count={}, ttl_expired_in_cache={}, ttl_expired_on_disk={}, cache_repaired={}, cache_invalidated={}, cache_evictions={}, cache_max_keys={}, cache_current_keys={}, inconsistency_total={}, inconsistency_only_in_cache={}, inconsistency_only_in_disk={}, inconsistency_value_mismatch={}, last_repair_target={}, last_repair_total={}, last_repair_only_in_cache={}, last_repair_only_in_disk={}, last_repair_value_mismatch={}",
+            "engine={}, len={}, syncmode={}, cache_policy={}, repair_mode={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}, reads={}, writes={}, deletes={}, cache_hits={}, cache_misses={}, disk_reads={}, disk_writes={}, wal_appends={}, fsync_count={}, ttl_expired_in_cache={}, ttl_expired_on_disk={}, cache_repaired={}, cache_invalidated={}, cache_evictions={}, auto_repairs={}, auto_repairs_read={}, auto_repairs_write={}, cache_max_keys={}, cache_current_keys={}, inconsistency_total={}, inconsistency_only_in_cache={}, inconsistency_only_in_disk={}, inconsistency_value_mismatch={}, last_repair_target={}, last_repair_total={}, last_repair_only_in_cache={}, last_repair_only_in_disk={}, last_repair_value_mismatch={}",
             ctx.store.engine_name(),
             ctx.store.len(),
             mode,
             cache_policy,
+            repair_mode,
             wal_path,
             wal_bytes,
             snapshot_path,
@@ -135,6 +141,9 @@ impl Command for StatusCommand {
             stats.cache_repaired,
             stats.cache_invalidated,
             stats.cache_evictions,
+            stats.auto_repairs,
+            stats.auto_repairs_read,
+            stats.auto_repairs_write,
             cache_max_keys,
             cache_current_keys,
             inconsistency_total,
@@ -151,3 +160,8 @@ impl Command for StatusCommand {
 }
 
 crate::submit_command!(StatusCommand);
+
+
+
+
+

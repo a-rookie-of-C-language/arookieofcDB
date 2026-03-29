@@ -1,8 +1,8 @@
 ﻿mod commands;
 mod engine;
+mod key_codec;
 mod storage;
 mod value_codec;
-mod key_codec;
 
 use crate::commands::CommandRegistry;
 use crate::commands::CommandSignal;
@@ -18,6 +18,11 @@ fn main() -> io::Result<()> {
 
     println!("arookieofcDB CLI v{}", APP_VERSION);
     println!("type `help` to see commands");
+    println!(
+        "            ╔═══════════════════════════════╗
+            ║       ArookieofcDB            ║
+            ╚═══════════════════════════════╝"
+    );
 
     let stdin = io::stdin();
     loop {
