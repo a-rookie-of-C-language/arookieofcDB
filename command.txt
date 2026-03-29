@@ -1,0 +1,91 @@
+﻿# arookieofcDB Command Test Script
+# 用法：逐行执行，便于观察每步输出与 status 指标。
+
+# 0) 基础
+help
+status
+
+# 1) 引擎切换与基础读写
+engine memory
+set k1 v1
+get k1
+status
+
+engine wal
+set k1 v1
+get k1
+status
+
+engine hybrid
+set k1 v1
+get k1
+status
+
+# 2) select --disk（重点）
+# 在 hybrid 下：get 走缓存优先，select --disk 强制走持久层且不回填缓存
+engine hybrid
+set sel:1 hello
+get sel:1
+select sel:1
+select --disk sel:1
+status
+
+# 3) cachemax（命令设置缓存上限）
+# 0 表示不限制
+engine hybrid
+cachemax
+cachemax 1
+set c1 v1
+set c2 v2
+status
+# 观察: cache_evictions 应增加，cache_current_keys 应为 1
+get c1
+status
+# 观察: c1 会从磁盘回源
+cachemax 0
+status
+
+# 4) TTL 持久化验证（WAL）
+engine wal
+set ttl:persist alive
+expire ttl:persist 30
+ttl ttl:persist
+status
+# 现在退出并重启程序后执行：
+# engine wal
+# get ttl:persist
+# ttl ttl:persist
+
+# 5) 停机期间过期验证（WAL）
+engine wal
+set ttl:down will_expire
+expire ttl:down 1
+status
+# 现在退出，等待 2 秒，再重启执行：
+# engine wal
+# get ttl:down
+# ttl ttl:down
+
+# 6) SQL-like
+engine hybrid
+add user:1 alice
+select user:1
+update user:1 bob
+select user:1
+delete user:1
+select user:1
+status
+
+# 7) 数值命令
+engine hybrid
+set count 100
+incr count
+incrby count 10
+set ratio 3.14
+incrbyfloat ratio 0.86
+get count
+get ratio
+status
+
+# 8) 结束
+exit

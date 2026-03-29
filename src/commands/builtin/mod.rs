@@ -1,11 +1,19 @@
-mod checkpoint;
-mod compact;
+﻿mod cachemax;
+mod add;
 mod del;
+mod decr;
+mod engine;
+mod expire;
 mod get;
+mod incr;
+mod incrby;
+mod incrbyfloat;
 mod len;
-mod range;
+mod select;
 mod set;
 mod status;
-mod sync;
-mod syncmode;
+mod ttl;
+mod update;
 mod utils;
+mod delete;
+

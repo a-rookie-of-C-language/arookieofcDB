@@ -1,10 +1,11 @@
-use std::io;
 use crate::storage::StorageEngine;
+use std::io;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandSignal {
     Continue,
     Exit,
+    SwitchEngine(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,14 @@ impl CommandOutput {
 
     pub fn with_signal(message: Option<String>, signal: CommandSignal) -> Self {
         Self { message, signal }
+    }
+
+    pub fn switch_engine(mode: impl Into<String>) -> Self {
+        let mode = mode.into();
+        Self {
+            message: Some(format!("switching engine to {mode}")),
+            signal: CommandSignal::SwitchEngine(mode),
+        }
     }
 }
 
@@ -88,7 +97,11 @@ impl CommandRegistry {
         Self { commands }
     }
 
-    pub fn execute_line(&self, store: &mut dyn StorageEngine, line: &str) -> io::Result<CommandOutput> {
+    pub fn execute_line(
+        &self,
+        store: &mut dyn StorageEngine,
+        line: &str,
+    ) -> io::Result<CommandOutput> {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             return Ok(CommandOutput::none());

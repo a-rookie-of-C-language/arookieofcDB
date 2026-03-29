@@ -1,4 +1,4 @@
-use std::io;
+﻿use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::storage::SyncPolicy;
@@ -43,8 +43,20 @@ impl Command for StatusCommand {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| String::from("none"));
 
+        let stats = ctx.store.stats();
+        let cache_max_keys = ctx
+            .store
+            .cache_max_keys()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| String::from("none"));
+        let cache_current_keys = ctx
+            .store
+            .cache_current_keys()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| String::from("none"));
+
         Ok(CommandOutput::message(format!(
-            "engine={}, len={}, syncmode={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}",
+            "engine={}, len={}, syncmode={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}, reads={}, writes={}, deletes={}, cache_hits={}, cache_misses={}, disk_reads={}, disk_writes={}, wal_appends={}, fsync_count={}, ttl_expired_in_cache={}, ttl_expired_on_disk={}, cache_repaired={}, cache_invalidated={}, cache_evictions={}, cache_max_keys={}, cache_current_keys={}",
             ctx.store.engine_name(),
             ctx.store.len(),
             mode,
@@ -52,7 +64,23 @@ impl Command for StatusCommand {
             wal_bytes,
             snapshot_path,
             snapshot_bytes,
-            snapshot_mtime
+            snapshot_mtime,
+            stats.reads,
+            stats.writes,
+            stats.deletes,
+            stats.cache_hits,
+            stats.cache_misses,
+            stats.disk_reads,
+            stats.disk_writes,
+            stats.wal_appends,
+            stats.fsync_count,
+            stats.ttl_expired_in_cache,
+            stats.ttl_expired_on_disk,
+            stats.cache_repaired,
+            stats.cache_invalidated,
+            stats.cache_evictions,
+            cache_max_keys,
+            cache_current_keys,
         )))
     }
 }

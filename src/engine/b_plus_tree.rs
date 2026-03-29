@@ -1,3 +1,5 @@
+﻿use crate::key_codec::KeyEncoding;
+
 const DEFAULT_ORDER: usize = 4;
 
 #[derive(Debug, Clone)]
@@ -9,13 +11,13 @@ enum Node {
 #[derive(Debug, Clone)]
 struct InternalNode {
     // Separator keys, children.len() == keys.len() + 1
-    keys: Vec<i64>,
+    keys: Vec<KeyEncoding>,
     children: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
 struct LeafNode {
-    keys: Vec<i64>,
+    keys: Vec<KeyEncoding>,
     values: Vec<Vec<u8>>,
     next: Option<usize>,
 }
@@ -58,7 +60,7 @@ impl BPlusTree {
         self.len == 0
     }
 
-    pub fn insert(&mut self, key: i64, value: Vec<u8>) {
+    pub fn insert(&mut self, key: KeyEncoding, value: Vec<u8>) {
         let split = self.insert_recursive(self.root, key, value);
 
         if let Some((promoted_key, right_id)) = split {
@@ -72,24 +74,24 @@ impl BPlusTree {
         }
     }
 
-    pub fn get(&self, key: i64) -> Option<&[u8]> {
+    pub fn get(&self, key: &KeyEncoding) -> Option<&[u8]> {
         let leaf_id = self.find_leaf_id(key);
 
         match &self.nodes[leaf_id] {
             Node::Leaf(leaf) => leaf
                 .keys
-                .binary_search(&key)
+                .binary_search(key)
                 .ok()
                 .map(|idx| leaf.values[idx].as_slice()),
             Node::Internal(_) => None,
         }
     }
 
-    pub fn delete(&mut self, key: i64) -> Option<Vec<u8>> {
+    pub fn delete(&mut self, key: &KeyEncoding) -> Option<Vec<u8>> {
         let leaf_id = self.find_leaf_id(key);
 
         match &mut self.nodes[leaf_id] {
-            Node::Leaf(leaf) => match leaf.keys.binary_search(&key) {
+            Node::Leaf(leaf) => match leaf.keys.binary_search(key) {
                 Ok(pos) => {
                     leaf.keys.remove(pos);
                     self.len -= 1;
@@ -101,7 +103,7 @@ impl BPlusTree {
         }
     }
 
-    pub fn range_query(&self, start: i64, end: i64) -> Vec<(i64, Vec<u8>)> {
+    pub fn range_query(&self, start: &KeyEncoding, end: &KeyEncoding) -> Vec<(KeyEncoding, Vec<u8>)> {
         if start > end {
             return Vec::new();
         }
@@ -116,13 +118,13 @@ impl BPlusTree {
             };
 
             for (k, v) in leaf.keys.iter().zip(leaf.values.iter()) {
-                if *k < start {
+                if k < start {
                     continue;
                 }
-                if *k > end {
+                if k > end {
                     return result;
                 }
-                result.push((*k, v.clone()));
+                result.push((k.clone(), v.clone()));
             }
 
             match leaf.next {
@@ -134,6 +136,35 @@ impl BPlusTree {
         result
     }
 
+    pub fn entries(&self) -> Vec<(KeyEncoding, Vec<u8>)> {
+        let mut current = self.root;
+        while let Node::Internal(internal) = &self.nodes[current] {
+            current = internal.children[0];
+        }
+
+        let mut out = Vec::new();
+        loop {
+            let leaf = match &self.nodes[current] {
+                Node::Leaf(leaf) => leaf,
+                Node::Internal(_) => break,
+            };
+
+            out.extend(
+                leaf.keys
+                    .iter()
+                    .cloned()
+                    .zip(leaf.values.iter().cloned()),
+            );
+
+            match leaf.next {
+                Some(next_id) => current = next_id,
+                None => break,
+            }
+        }
+
+        out
+    }
+
     fn max_keys(&self) -> usize {
         self.order - 1
     }
@@ -141,9 +172,9 @@ impl BPlusTree {
     fn insert_recursive(
         &mut self,
         node_id: usize,
-        key: i64,
+        key: KeyEncoding,
         value: Vec<u8>,
-    ) -> Option<(i64, usize)> {
+    ) -> Option<(KeyEncoding, usize)> {
         let is_leaf = matches!(self.nodes[node_id], Node::Leaf(_));
 
         if is_leaf {
@@ -156,9 +187,9 @@ impl BPlusTree {
     fn insert_into_leaf(
         &mut self,
         leaf_id: usize,
-        key: i64,
+        key: KeyEncoding,
         value: Vec<u8>,
-    ) -> Option<(i64, usize)> {
+    ) -> Option<(KeyEncoding, usize)> {
         let max_keys = self.max_keys();
 
         let leaf = match &mut self.nodes[leaf_id] {
@@ -168,7 +199,6 @@ impl BPlusTree {
 
         match leaf.keys.binary_search(&key) {
             Ok(pos) => {
-                // Update existing key.
                 leaf.values[pos] = value;
                 return None;
             }
@@ -187,7 +217,7 @@ impl BPlusTree {
 
         let right_keys = leaf.keys.split_off(split_pos);
         let right_values = leaf.values.split_off(split_pos);
-        let promoted_key = right_keys[0];
+        let promoted_key = right_keys[0].clone();
         let old_next = leaf.next;
 
         let right_leaf = LeafNode {
@@ -209,11 +239,11 @@ impl BPlusTree {
     fn insert_into_internal(
         &mut self,
         node_id: usize,
-        key: i64,
+        key: KeyEncoding,
         value: Vec<u8>,
-    ) -> Option<(i64, usize)> {
+    ) -> Option<(KeyEncoding, usize)> {
         let child_index = match &self.nodes[node_id] {
-            Node::Internal(internal) => child_index_for_key(&internal.keys, key),
+            Node::Internal(internal) => child_index_for_key(&internal.keys, &key),
             Node::Leaf(_) => return None,
         };
 
@@ -233,7 +263,7 @@ impl BPlusTree {
             Node::Leaf(_) => return None,
         };
 
-        let insert_pos = child_index_for_key(&internal.keys, promoted_key);
+        let insert_pos = child_index_for_key(&internal.keys, &promoted_key);
         internal.keys.insert(insert_pos, promoted_key);
         internal.children.insert(insert_pos + 1, right_child_id);
 
@@ -242,7 +272,7 @@ impl BPlusTree {
         }
 
         let mid = internal.keys.len() / 2;
-        let promoted = internal.keys[mid];
+        let promoted = internal.keys[mid].clone();
 
         let right_keys = internal.keys.split_off(mid + 1);
         let right_children = internal.children.split_off(mid + 1);
@@ -259,7 +289,7 @@ impl BPlusTree {
         Some((promoted, right_id))
     }
 
-    fn find_leaf_id(&self, key: i64) -> usize {
+    fn find_leaf_id(&self, key: &KeyEncoding) -> usize {
         let mut current = self.root;
 
         loop {
@@ -274,8 +304,8 @@ impl BPlusTree {
     }
 }
 
-fn child_index_for_key(keys: &[i64], key: i64) -> usize {
-    match keys.binary_search(&key) {
+fn child_index_for_key(keys: &[KeyEncoding], key: &KeyEncoding) -> usize {
+    match keys.binary_search(key) {
         Ok(i) => i + 1,
         Err(i) => i,
     }
@@ -284,31 +314,36 @@ fn child_index_for_key(keys: &[i64], key: i64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::BPlusTree;
+    use crate::key_codec::KeyEncoding;
 
     fn v(n: i64) -> Vec<u8> {
         format!("v{n}").into_bytes()
     }
 
+    fn k(n: i64) -> KeyEncoding {
+        KeyEncoding::Int(n)
+    }
+
     #[test]
     fn insert_and_get() {
         let mut tree = BPlusTree::with_order(4);
-        tree.insert(10, v(10));
-        tree.insert(20, v(20));
-        tree.insert(15, v(15));
+        tree.insert(k(10), v(10));
+        tree.insert(k(20), v(20));
+        tree.insert(k(15), v(15));
 
-        assert_eq!(tree.get(10), Some("v10".as_bytes()));
-        assert_eq!(tree.get(15), Some("v15".as_bytes()));
-        assert_eq!(tree.get(99), None);
+        assert_eq!(tree.get(&k(10)), Some("v10".as_bytes()));
+        assert_eq!(tree.get(&k(15)), Some("v15".as_bytes()));
+        assert_eq!(tree.get(&k(99)), None);
         assert_eq!(tree.len(), 3);
     }
 
     #[test]
     fn update_existing_key() {
         let mut tree = BPlusTree::new();
-        tree.insert(7, b"old".to_vec());
-        tree.insert(7, b"new".to_vec());
+        tree.insert(k(7), b"old".to_vec());
+        tree.insert(k(7), b"new".to_vec());
 
-        assert_eq!(tree.get(7), Some("new".as_bytes()));
+        assert_eq!(tree.get(&k(7)), Some("new".as_bytes()));
         assert_eq!(tree.len(), 1);
     }
 
@@ -316,13 +351,16 @@ mod tests {
     fn split_and_range_query() {
         let mut tree = BPlusTree::with_order(4);
         for i in 1..=20 {
-            tree.insert(i, v(i));
+            tree.insert(k(i), v(i));
         }
 
         let got: Vec<i64> = tree
-            .range_query(6, 12)
+            .range_query(&k(6), &k(12))
             .into_iter()
-            .map(|(k, _)| k)
+            .map(|(k, _)| match k {
+                KeyEncoding::Int(v) => v,
+                _ => -1,
+            })
             .collect();
 
         assert_eq!(got, vec![6, 7, 8, 9, 10, 11, 12]);
@@ -331,13 +369,13 @@ mod tests {
     #[test]
     fn delete_key() {
         let mut tree = BPlusTree::new();
-        tree.insert(1, v(1));
-        tree.insert(2, v(2));
+        tree.insert(k(1), v(1));
+        tree.insert(k(2), v(2));
 
-        let deleted = tree.delete(1);
+        let deleted = tree.delete(&k(1));
         assert_eq!(deleted, Some(v(1)));
-        assert_eq!(tree.get(1), None);
-        assert_eq!(tree.get(2), Some("v2".as_bytes()));
+        assert_eq!(tree.get(&k(1)), None);
+        assert_eq!(tree.get(&k(2)), Some("v2".as_bytes()));
         assert_eq!(tree.len(), 1);
     }
 }
