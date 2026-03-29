@@ -100,6 +100,15 @@ impl WalStore {
         (value, expired_now)
     }
 
+    pub fn get_with_expiry_ref(&mut self, key: &KeyEncoding) -> (Option<&[u8]>, bool) {
+        let had_deadline = self.expires.contains_key(key);
+        let existed_before = self.tree.get(key).is_some();
+        self.purge_if_expired(key);
+        let value = self.tree.get(key);
+        let expired_now = had_deadline && existed_before && value.is_none();
+        (value, expired_now)
+    }
+
     pub fn set(&mut self, key: KeyEncoding, value: Vec<u8>) -> io::Result<()> {
         self.stats.writes += 1;
         self.stats.disk_writes += 1;
@@ -133,6 +142,11 @@ impl WalStore {
         end: &KeyEncoding,
     ) -> Vec<(KeyEncoding, Vec<u8>)> {
         self.tree.range_query(start, end)
+    }
+
+    pub fn entries(&mut self) -> Vec<(KeyEncoding, Vec<u8>)> {
+        self.purge_all_expired();
+        self.tree.entries()
     }
 
     pub fn sync(&mut self) -> io::Result<()> {
@@ -802,6 +816,9 @@ mod tests {
         cleanup(&wal_path);
     }
 }
+
+
+
 
 
 

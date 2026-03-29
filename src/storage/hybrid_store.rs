@@ -1,9 +1,33 @@
-﻿use std::io;
+﻿use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 
 use crate::key_codec::KeyEncoding;
 
 use super::{EngineStats, MemoryStore, StorageEngine, SyncPolicy, TtlState, WalStore};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CachePolicy {
+    Lru,
+    None,
+}
+
+impl CachePolicy {
+    fn from_input(raw: &str) -> Option<Self> {
+        match raw.to_ascii_lowercase().as_str() {
+            "lru" => Some(Self::Lru),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Lru => "lru",
+            Self::None => "none",
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct HybridStore {
@@ -11,6 +35,7 @@ pub struct HybridStore {
     wal: WalStore,
     stats: EngineStats,
     strict_read_check: bool,
+    cache_policy: CachePolicy,
 }
 
 impl HybridStore {
@@ -20,21 +45,84 @@ impl HybridStore {
             .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
             .unwrap_or(false);
 
-        Self::open_with_mode(path, strict_read_check)
+        Self::open_with_mode(path, strict_read_check, CachePolicy::Lru)
     }
 
-    fn open_with_mode(path: impl AsRef<Path>, strict_read_check: bool) -> io::Result<Self> {
+    fn open_with_mode(
+        path: impl AsRef<Path>,
+        strict_read_check: bool,
+        cache_policy: CachePolicy,
+    ) -> io::Result<Self> {
         Ok(Self {
             memory: MemoryStore::new(),
             wal: WalStore::open(path)?,
             stats: EngineStats::default(),
             strict_read_check,
+            cache_policy,
         })
     }
 
     #[cfg(test)]
     fn open_with_strict(path: impl AsRef<Path>, strict_read_check: bool) -> io::Result<Self> {
-        Self::open_with_mode(path, strict_read_check)
+        Self::open_with_mode(path, strict_read_check, CachePolicy::Lru)
+    }
+
+    fn snapshot_maps(&mut self) -> (HashMap<KeyEncoding, Vec<u8>>, HashMap<KeyEncoding, Vec<u8>>) {
+        let cache = self.memory.entries().into_iter().collect::<HashMap<_, _>>();
+        let disk = self.wal.entries().into_iter().collect::<HashMap<_, _>>();
+        (cache, disk)
+    }
+
+    fn build_consistency_report(
+        cache: &HashMap<KeyEncoding, Vec<u8>>,
+        disk: &HashMap<KeyEncoding, Vec<u8>>,
+    ) -> super::ConsistencyReport {
+        let mut only_in_cache = 0usize;
+        let mut only_in_disk = 0usize;
+        let mut value_mismatches = 0usize;
+        let mut samples = Vec::new();
+
+        for (key, cache_value) in cache {
+            match disk.get(key) {
+                None => {
+                    only_in_cache += 1;
+                    samples.push(super::ConsistencyDiff {
+                        key: key.clone(),
+                        kind: super::ConsistencyDiffKind::OnlyInCache,
+                    });
+                }
+                Some(disk_value) if disk_value != cache_value => {
+                    value_mismatches += 1;
+                    samples.push(super::ConsistencyDiff {
+                        key: key.clone(),
+                        kind: super::ConsistencyDiffKind::ValueMismatch,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        for key in disk.keys() {
+            if !cache.contains_key(key) {
+                only_in_disk += 1;
+                samples.push(super::ConsistencyDiff {
+                    key: key.clone(),
+                    kind: super::ConsistencyDiffKind::OnlyInDisk,
+                });
+            }
+        }
+
+        samples.sort_by(|a, b| a.key.cmp(&b.key));
+        samples.truncate(10);
+
+        super::ConsistencyReport {
+            cache_keys: cache.len(),
+            disk_keys: disk.len(),
+            only_in_cache,
+            only_in_disk,
+            value_mismatches,
+            samples,
+        }
     }
 }
 
@@ -49,6 +137,17 @@ impl StorageEngine for HybridStore {
 
     fn get(&mut self, key: &KeyEncoding) -> Option<&[u8]> {
         self.stats.reads += 1;
+
+        if self.cache_policy == CachePolicy::None {
+            let (disk_ref, disk_expired) = self.wal.get_with_expiry_ref(key);
+            if disk_expired {
+                self.stats.ttl_expired_on_disk += 1;
+            }
+            if disk_ref.is_some() {
+                self.stats.disk_reads += 1;
+            }
+            return disk_ref;
+        }
 
         let (mem_value, mem_expired) = self.memory.get_with_expiry_flag(key);
         if mem_expired {
@@ -116,7 +215,13 @@ impl StorageEngine for HybridStore {
         self.stats.writes += 1;
         self.stats.disk_writes += 1;
         self.wal.set(key.clone(), value.clone())?;
-        self.memory.set(key, value)
+
+        if self.cache_policy == CachePolicy::Lru {
+            self.memory.set(key, value)
+        } else {
+            let _ = self.memory.delete(&key);
+            Ok(())
+        }
     }
 
     fn delete(&mut self, key: &KeyEncoding) -> io::Result<Option<Vec<u8>>> {
@@ -135,6 +240,73 @@ impl StorageEngine for HybridStore {
         end: &KeyEncoding,
     ) -> Vec<(KeyEncoding, Vec<u8>)> {
         self.wal.range_query(start, end)
+    }
+
+    fn verify_consistency(&mut self) -> io::Result<super::ConsistencyReport> {
+        let (cache, disk) = self.snapshot_maps();
+        Ok(Self::build_consistency_report(&cache, &disk))
+    }
+
+    fn repair_consistency(
+        &mut self,
+        target: super::RepairTarget,
+    ) -> io::Result<super::RepairReport> {
+        let (cache, disk) = self.snapshot_maps();
+        let mut report = super::RepairReport {
+            target,
+            repaired_only_in_cache: 0,
+            repaired_only_in_disk: 0,
+            repaired_value_mismatches: 0,
+        };
+
+        match target {
+            super::RepairTarget::Disk => {
+                for (key, cache_value) in &cache {
+                    match disk.get(key) {
+                        None => {
+                            self.wal.set(key.clone(), cache_value.clone())?;
+                            report.repaired_only_in_cache += 1;
+                        }
+                        Some(disk_value) if disk_value != cache_value => {
+                            self.wal.set(key.clone(), cache_value.clone())?;
+                            report.repaired_value_mismatches += 1;
+                        }
+                        _ => {}
+                    }
+                }
+
+                for key in disk.keys() {
+                    if !cache.contains_key(key) {
+                        let _ = self.wal.delete(key)?;
+                        report.repaired_only_in_disk += 1;
+                    }
+                }
+            }
+            super::RepairTarget::Cache => {
+                for (key, disk_value) in &disk {
+                    match cache.get(key) {
+                        None => {
+                            self.memory.set(key.clone(), disk_value.clone())?;
+                            report.repaired_only_in_disk += 1;
+                        }
+                        Some(cache_value) if cache_value != disk_value => {
+                            self.memory.set(key.clone(), disk_value.clone())?;
+                            report.repaired_value_mismatches += 1;
+                        }
+                        _ => {}
+                    }
+                }
+
+                for key in cache.keys() {
+                    if !disk.contains_key(key) {
+                        let _ = self.memory.delete(key)?;
+                        report.repaired_only_in_cache += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(report)
     }
 
     fn expire(&mut self, key: &KeyEncoding, seconds: u64) -> io::Result<bool> {
@@ -177,6 +349,25 @@ impl StorageEngine for HybridStore {
 
     fn cache_current_keys(&self) -> Option<usize> {
         Some(self.memory.cache_current_keys())
+    }
+
+    fn set_cache_policy(&mut self, policy: &str) -> io::Result<()> {
+        let Some(policy) = CachePolicy::from_input(policy) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid cache policy: use lru|none",
+            ));
+        };
+
+        self.cache_policy = policy;
+        if self.cache_policy == CachePolicy::None {
+            self.memory.clear_cache();
+        }
+        Ok(())
+    }
+
+    fn cache_policy(&self) -> Option<&'static str> {
+        Some(self.cache_policy.as_str())
     }
 
     fn wal_path(&self) -> Option<&Path> {
@@ -312,5 +503,76 @@ mod tests {
 
         cleanup(&wal_path);
     }
+
+    #[test]
+    fn cache_policy_none_disables_backfill() {
+        let wal_path = unique_wal_path();
+        let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+        let key = KeyEncoding::Raw("p:none".to_string());
+
+        store.set_cache_policy("none").expect("set policy none");
+        store.set(key.clone(), b"v".to_vec()).expect("set");
+
+        assert_eq!(store.cache_current_keys(), Some(0));
+        assert_eq!(store.get(&key), Some("v".as_bytes()));
+        assert_eq!(store.cache_current_keys(), Some(0));
+
+        let stats_after_none = store.stats();
+        let hits_before = stats_after_none.cache_hits;
+
+        store.set_cache_policy("lru").expect("set policy lru");
+        assert_eq!(store.get(&key), Some("v".as_bytes()));
+        assert_eq!(store.cache_current_keys(), Some(1));
+
+        let stats_after_lru = store.stats();
+        assert!(stats_after_lru.cache_hits >= hits_before);
+
+        cleanup(&wal_path);
+    }    #[test]
+    fn verify_detects_mismatch_and_repair_to_disk() {
+        let wal_path = unique_wal_path();
+        let key = KeyEncoding::Raw("vr:key".to_string());
+
+        let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+        store.set(key.clone(), b"disk".to_vec()).expect("set");
+        let _ = store.memory.set(key.clone(), b"cache".to_vec());
+
+        let report = store.verify_consistency().expect("verify");
+        assert_eq!(report.value_mismatches, 1);
+
+        let repaired = store
+            .repair_consistency(super::super::RepairTarget::Disk)
+            .expect("repair");
+        assert_eq!(repaired.repaired_value_mismatches, 1);
+
+        let report_after = store.verify_consistency().expect("verify after");
+        assert_eq!(report_after.total_issues(), 0);
+
+        cleanup(&wal_path);
+    }
+
+    #[test]
+    fn verify_detects_disk_only_and_repair_to_cache() {
+        let wal_path = unique_wal_path();
+        let key = KeyEncoding::Raw("vr:disk-only".to_string());
+
+        let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+        store.set(key.clone(), b"v".to_vec()).expect("set");
+        let _ = store.memory.delete(&key);
+
+        let report = store.verify_consistency().expect("verify");
+        assert_eq!(report.only_in_disk, 1);
+
+        let repaired = store
+            .repair_consistency(super::super::RepairTarget::Cache)
+            .expect("repair");
+        assert_eq!(repaired.repaired_only_in_disk, 1);
+
+        let report_after = store.verify_consistency().expect("verify after");
+        assert_eq!(report_after.total_issues(), 0);
+
+        cleanup(&wal_path);
+    }
 }
+
 

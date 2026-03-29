@@ -1,4 +1,5 @@
-﻿mod cachemax;
+﻿mod cachepolicy;
+mod cachemax;
 mod add;
 mod del;
 mod decr;
@@ -16,4 +17,9 @@ mod ttl;
 mod update;
 mod utils;
 mod delete;
+
+
+
+mod verify;
+mod repair;
 

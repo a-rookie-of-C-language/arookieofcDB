@@ -48,6 +48,12 @@ impl MemoryStore {
         self.cache_evictions
     }
 
+    pub fn clear_cache(&mut self) {
+        self.table = ArookieofcHashTable::new();
+        self.expires.clear();
+        self.lru_order.clear();
+    }
+
     pub fn get_with_expiry_flag(&mut self, key: &KeyEncoding) -> (Option<Vec<u8>>, bool) {
         let had_deadline = self.expires.contains_key(key);
         let existed_before = self.table.get(key).is_some();
@@ -58,6 +64,11 @@ impl MemoryStore {
         }
         let expired_now = had_deadline && existed_before && value.is_none();
         (value, expired_now)
+    }
+
+    pub fn entries(&mut self) -> Vec<(KeyEncoding, Vec<u8>)> {
+        self.purge_all_expired();
+        self.table.entries()
     }
 
     fn touch_key(&mut self, key: &KeyEncoding) {
@@ -255,4 +266,7 @@ mod tests {
         assert_eq!(store.cache_evictions(), 1);
     }
 }
+
+
+
 

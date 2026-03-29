@@ -54,12 +54,18 @@ impl Command for StatusCommand {
             .cache_current_keys()
             .map(|v| v.to_string())
             .unwrap_or_else(|| String::from("none"));
+        let cache_policy = ctx
+            .store
+            .cache_policy()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| String::from("none"));
 
         Ok(CommandOutput::message(format!(
-            "engine={}, len={}, syncmode={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}, reads={}, writes={}, deletes={}, cache_hits={}, cache_misses={}, disk_reads={}, disk_writes={}, wal_appends={}, fsync_count={}, ttl_expired_in_cache={}, ttl_expired_on_disk={}, cache_repaired={}, cache_invalidated={}, cache_evictions={}, cache_max_keys={}, cache_current_keys={}",
+            "engine={}, len={}, syncmode={}, cache_policy={}, wal={}, wal_bytes={}, snapshot={}, snapshot_bytes={}, snapshot_mtime_unix={}, reads={}, writes={}, deletes={}, cache_hits={}, cache_misses={}, disk_reads={}, disk_writes={}, wal_appends={}, fsync_count={}, ttl_expired_in_cache={}, ttl_expired_on_disk={}, cache_repaired={}, cache_invalidated={}, cache_evictions={}, cache_max_keys={}, cache_current_keys={}",
             ctx.store.engine_name(),
             ctx.store.len(),
             mode,
+            cache_policy,
             wal_path,
             wal_bytes,
             snapshot_path,
@@ -86,3 +92,4 @@ impl Command for StatusCommand {
 }
 
 crate::submit_command!(StatusCommand);
+

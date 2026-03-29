@@ -48,4 +48,14 @@ impl ArookieofcHashTable {
         pairs.sort_by(|(ka, _), (kb, _)| ka.cmp(kb));
         pairs
     }
+
+    pub fn entries(&self) -> Vec<(KeyEncoding, Vec<u8>)> {
+        let mut pairs = self
+            .hash_table
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<Vec<_>>();
+        pairs.sort_by(|(ka, _), (kb, _)| ka.cmp(kb));
+        pairs
+    }
 }

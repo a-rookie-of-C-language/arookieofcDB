@@ -89,3 +89,26 @@ status
 
 # 8) 结束
 exit
+
+# 9) cachepolicy（缓存策略）
+engine hybrid
+cachepolicy
+cachepolicy none
+set pn 1
+get pn
+status
+# 观察: cache_policy=none 且 cache_current_keys 不增长
+cachepolicy lru
+get pn
+status
+# 观察: 切回 lru 后读取会回填缓存
+
+# 10) 一致性验证与修复（hybrid）
+engine hybrid
+set vr:key disk
+verify
+# 如需修复（以磁盘为准 / 以缓存为准）：
+repair --to disk
+verify
+repair --to cache
+verify
