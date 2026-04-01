@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::storage::RepairMode;
@@ -26,7 +26,7 @@ impl Command for RepairModeCommand {
 
         if arg.is_none() {
             let out = ctx
-                .store
+                .repair_mode()
                 .repair_mode()
                 .map(|m| m.as_str().to_string())
                 .unwrap_or_else(|| String::from("none"));
@@ -41,7 +41,7 @@ impl Command for RepairModeCommand {
             ));
         };
 
-        ctx.store.set_repair_mode(mode)?;
+        ctx.repair_mode().set_repair_mode(mode)?;
         Ok(CommandOutput::message(format!("ok (repair_mode={})", mode.as_str())))
     }
 }

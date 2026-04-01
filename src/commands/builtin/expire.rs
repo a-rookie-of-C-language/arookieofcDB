@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 
@@ -18,11 +18,11 @@ impl Command for ExpireCommand {
         let seconds = parse_i64(parts.next(), "missing seconds for expire")?;
 
         if seconds <= 0 {
-            let removed = ctx.store.delete(&key)?.is_some();
+            let removed = ctx.kv().delete(&key)?.is_some();
             return Ok(CommandOutput::message(if removed { "1" } else { "0" }));
         }
 
-        let changed = ctx.store.expire(&key, seconds as u64)?;
+        let changed = ctx.ttl().expire(&key, seconds as u64)?;
         Ok(CommandOutput::message(if changed { "1" } else { "0" }))
     }
 }

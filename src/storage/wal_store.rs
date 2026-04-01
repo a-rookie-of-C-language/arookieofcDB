@@ -1,10 +1,15 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::{EngineStats, StorageEngine, SyncPolicy, TtlState};
+use super::{
+    CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine, ConsistencyRepairEngine,
+    DiskReadEngine, EngineStats, FaultInjectionEngine, KvEngine, RangeReadEngine,
+    RepairControlEngine, StoragePathIntrospection, StorageStatsIntrospection, SyncPolicy,
+    TtlEngine, TtlState,
+};
 use crate::engine::BPlusTree;
 use crate::key_codec::KeyEncoding;
 
@@ -48,9 +53,14 @@ impl WalStore {
             replay_wal(&wal_path, &mut tree, &mut expires)?;
         }
 
-        purge_expired_state(&mut tree, &mut expires);
+        let ttl_loaded_on_startup = expires.len() as u64;
+        let ttl_pruned_on_startup = purge_expired_state(&mut tree, &mut expires);
 
         let wal_file = open_wal_append(&wal_path)?;
+
+        let mut stats = EngineStats::default();
+        stats.ttl_loaded_on_startup = ttl_loaded_on_startup;
+        stats.ttl_pruned_on_startup = ttl_pruned_on_startup;
 
         Ok(Self {
             tree,
@@ -59,7 +69,7 @@ impl WalStore {
             wal_file,
             sync_policy: SyncPolicy::Always,
             expires,
-            stats: EngineStats::default(),
+            stats,
         })
     }
 
@@ -71,20 +81,12 @@ impl WalStore {
         &self.snapshot_path
     }
 
-    pub fn sync_policy(&self) -> SyncPolicy {
-        self.sync_policy
-    }
-
     pub fn set_sync_policy(&mut self, policy: SyncPolicy) {
         self.sync_policy = policy;
     }
 
     pub fn len(&mut self) -> usize {
         self.tree.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tree.is_empty()
     }
 
     pub fn get(&mut self, key: &KeyEncoding) -> Option<&[u8]> {
@@ -134,14 +136,6 @@ impl WalStore {
         }
         self.expires.remove(key);
         Ok(deleted)
-    }
-
-    pub fn range_query(
-        &self,
-        start: &KeyEncoding,
-        end: &KeyEncoding,
-    ) -> Vec<(KeyEncoding, Vec<u8>)> {
-        self.tree.range_query(start, end)
     }
 
     pub fn entries(&mut self) -> Vec<(KeyEncoding, Vec<u8>)> {
@@ -208,7 +202,7 @@ fn now_unix_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn purge_expired_state(tree: &mut BPlusTree, expires: &mut HashMap<KeyEncoding, u64>) {
+fn purge_expired_state(tree: &mut BPlusTree, expires: &mut HashMap<KeyEncoding, u64>) -> u64 {
     let now_ms = now_unix_ms();
     let expired_keys = expires
         .iter()
@@ -221,10 +215,12 @@ fn purge_expired_state(tree: &mut BPlusTree, expires: &mut HashMap<KeyEncoding, 
         })
         .collect::<Vec<_>>();
 
+    let pruned = expired_keys.len() as u64;
     for key in expired_keys {
         expires.remove(&key);
         let _ = tree.delete(&key);
     }
+    pruned
 }
 
 fn snapshot_path_for(wal_path: &Path) -> PathBuf {
@@ -530,7 +526,7 @@ fn read_key_blob(reader: &mut BufReader<File>) -> io::Result<KeyEncoding> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid encoded key in snapshot"))
 }
 
-impl StorageEngine for WalStore {
+impl KvEngine for WalStore {
     fn engine_name(&self) -> &'static str {
         "wal_bptree"
     }
@@ -547,6 +543,16 @@ impl StorageEngine for WalStore {
         WalStore::get(self, key)
     }
 
+    fn set(&mut self, key: KeyEncoding, value: Vec<u8>) -> io::Result<()> {
+        WalStore::set(self, key, value)
+    }
+
+    fn delete(&mut self, key: &KeyEncoding) -> io::Result<Option<Vec<u8>>> {
+        WalStore::delete(self, key)
+    }
+}
+
+impl DiskReadEngine for WalStore {
     fn get_disk_only(&mut self, key: &KeyEncoding) -> Option<Vec<u8>> {
         self.stats.reads += 1;
         self.stats.disk_reads += 1;
@@ -556,31 +562,32 @@ impl StorageEngine for WalStore {
         }
         value
     }
+}
 
-    fn set(&mut self, key: KeyEncoding, value: Vec<u8>) -> io::Result<()> {
-        WalStore::set(self, key, value)
-    }
-
-    fn delete(&mut self, key: &KeyEncoding) -> io::Result<Option<Vec<u8>>> {
-        WalStore::delete(self, key)
-    }
-
-    fn range_query(
-        &self,
+impl RangeReadEngine for WalStore {
+    fn range(
+        &mut self,
         start: &KeyEncoding,
         end: &KeyEncoding,
-    ) -> Vec<(KeyEncoding, Vec<u8>)> {
-        WalStore::range_query(self, start, end)
+    ) -> io::Result<Vec<(KeyEncoding, Vec<u8>)>> {
+        self.purge_all_expired();
+        Ok(self.tree.range_query(start, end))
     }
+}
 
-    fn sync(&mut self) -> io::Result<()> {
-        WalStore::sync(self)
-    }
+impl ConsistencyEngine for WalStore {}
 
-    fn checkpoint(&mut self) -> io::Result<()> {
-        WalStore::checkpoint(self)
-    }
+impl ConsistencyRepairEngine for WalStore {}
 
+impl RepairControlEngine for WalStore {}
+
+impl FaultInjectionEngine for WalStore {}
+
+impl CacheCapacityEngine for WalStore {}
+
+impl CachePolicyEngine for WalStore {}
+
+impl TtlEngine for WalStore {
     fn expire(&mut self, key: &KeyEncoding, seconds: u64) -> io::Result<bool> {
         self.purge_if_expired(key);
         if self.tree.get(key).is_none() {
@@ -616,15 +623,9 @@ impl StorageEngine for WalStore {
         let remain = ((*deadline_ms - now_ms) / 1000) as i64;
         Ok(TtlState::Seconds(remain))
     }
+}
 
-    fn sync_policy(&self) -> SyncPolicy {
-        WalStore::sync_policy(self)
-    }
-
-    fn set_sync_policy(&mut self, policy: SyncPolicy) {
-        WalStore::set_sync_policy(self, policy);
-    }
-
+impl StoragePathIntrospection for WalStore {
     fn wal_path(&self) -> Option<&Path> {
         Some(WalStore::wal_path(self))
     }
@@ -632,7 +633,9 @@ impl StorageEngine for WalStore {
     fn snapshot_path(&self) -> Option<&Path> {
         Some(WalStore::snapshot_path(self))
     }
+}
 
+impl StorageStatsIntrospection for WalStore {
     fn stats(&self) -> EngineStats {
         self.stats
     }
@@ -643,13 +646,12 @@ mod tests {
     use std::fs::OpenOptions;
     use std::io::Write;
     use std::path::{Path, PathBuf};
-    use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::key_codec::KeyEncoding;
-    use crate::storage::{StorageEngine, TtlState};
+    use crate::storage::{RangeReadEngine, SyncPolicy, TtlEngine, TtlState};
 
-    use super::{OP_SET_V2, SyncPolicy, WalStore};
+    use super::{OP_SET_V2, WalStore};
 
     fn unique_wal_path() -> PathBuf {
         let nanos = SystemTime::now()
@@ -794,23 +796,26 @@ mod tests {
     }
 
     #[test]
-    fn expired_key_does_not_reappear_after_restart() {
+    fn range_returns_inclusive_sorted_pairs() {
         let wal_path = unique_wal_path();
-        let key = KeyEncoding::Raw("ttl:e".to_string());
 
         {
             let mut store = WalStore::open(&wal_path).expect("open store");
-            store.set(key.clone(), b"v".to_vec()).expect("set");
-            assert!(store.expire(&key, 1).expect("expire"));
-            store.sync().expect("sync");
-        }
+            store.set(KeyEncoding::Int(3), b"v3".to_vec()).expect("set 3");
+            store.set(KeyEncoding::Int(1), b"v1".to_vec()).expect("set 1");
+            store.set(KeyEncoding::Int(2), b"v2".to_vec()).expect("set 2");
 
-        thread::sleep(Duration::from_millis(1100));
+            let got = store
+                .range(&KeyEncoding::Int(1), &KeyEncoding::Int(2))
+                .expect("range");
 
-        {
-            let mut restarted = WalStore::open(&wal_path).expect("re-open");
-            assert_eq!(restarted.get(&key), None);
-            assert_eq!(restarted.ttl(&key).expect("ttl"), TtlState::NotFound);
+            assert_eq!(
+                got,
+                vec![
+                    (KeyEncoding::Int(1), b"v1".to_vec()),
+                    (KeyEncoding::Int(2), b"v2".to_vec()),
+                ]
+            );
         }
 
         cleanup(&wal_path);

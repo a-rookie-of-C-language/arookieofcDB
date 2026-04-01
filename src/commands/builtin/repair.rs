@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::storage::RepairTarget;
@@ -42,7 +42,7 @@ impl Command for RepairCommand {
             }
         };
 
-        let report = ctx.store.repair_consistency(target)?;
+        let report = ctx.repair().repair_consistency(target)?;
         let target_name = match report.target {
             RepairTarget::Disk => "disk",
             RepairTarget::Cache => "cache",

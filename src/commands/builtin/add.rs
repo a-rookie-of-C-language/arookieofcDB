@@ -18,12 +18,12 @@ impl Command for AddCommand {
         let key = parse_key(parts.next(), "missing key for add")?;
         let value = parts.next().map(str::trim_start).ok_or_else(|| invalid_input("missing value for add"))?;
 
-        if ctx.store.get(&key).is_some() {
+        if ctx.kv().get(&key).is_some() {
             return Err(invalid_input("key already exists"));
         }
 
         let encoded = StringEncoding::from_input(value).encode();
-        ctx.store.set(key, encoded)?;
+        ctx.kv().set(key, encoded)?;
         Ok(CommandOutput::message("1"))
     }
 }

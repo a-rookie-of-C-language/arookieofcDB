@@ -14,7 +14,7 @@ impl Command for DelCommand {
 
     fn execute(&self, ctx: &mut CommandContext<'_>, args: &str) -> io::Result<CommandOutput> {
         let key = parse_key(first_arg(args), "missing key for del")?;
-        let deleted = ctx.store.delete(&key)?;
+        let deleted = ctx.kv().delete(&key)?;
         let removed = if deleted.is_some() { "1" } else { "0" };
         Ok(CommandOutput::message(removed))
     }

@@ -15,7 +15,7 @@ impl Command for DeleteCommand {
     fn execute(&self, ctx: &mut CommandContext<'_>, args: &str) -> io::Result<CommandOutput> {
         let mut parts = args.split_whitespace();
         let key = parse_key(parts.next(), "missing key for delete")?;
-        let deleted = ctx.store.delete(&key)?;
+        let deleted = ctx.kv().delete(&key)?;
         Ok(CommandOutput::message(if deleted.is_some() { "1" } else { "0" }))
     }
 }

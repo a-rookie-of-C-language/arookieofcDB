@@ -1,11 +1,14 @@
-﻿use std::fs::OpenOptions;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::key_codec::KeyEncoding;
-use crate::storage::{HybridStore, MemoryStore, StorageEngine, TtlState, WalStore};
+use crate::storage::{
+    CacheCapacityEngine, CachePolicyEngine, DiskReadEngine, KvEngine,
+    StorageStatsIntrospection, TtlEngine, TtlState, HybridStore, MemoryStore, WalStore,
+};
 use crate::value_codec::StringEncoding;
 
 fn unique_wal_path(prefix: &str) -> PathBuf {
@@ -26,7 +29,7 @@ fn s(input: &str) -> Vec<u8> {
     StringEncoding::from_input(input).encode()
 }
 
-fn decoded(store: &mut dyn StorageEngine, key: &KeyEncoding) -> Option<String> {
+fn decoded(store: &mut dyn KvEngine, key: &KeyEncoding) -> Option<String> {
     store
         .get(key)
         .map(|raw| StringEncoding::decode(raw).to_display_string())
@@ -196,6 +199,9 @@ fn wal_ttl_is_persisted_across_restart() {
             TtlState::Seconds(sec) => assert!(sec >= 1),
             other => panic!("unexpected ttl after restart: {other:?}"),
         }
+        let stats = restarted.stats();
+        assert!(stats.ttl_loaded_on_startup >= 1);
+        assert_eq!(stats.ttl_pruned_on_startup, 0);
     }
 
     cleanup(&wal_path);
@@ -219,6 +225,9 @@ fn wal_expired_while_down_remains_expired_after_restart() {
         let mut restarted = WalStore::open(&wal_path).expect("reopen wal");
         assert_eq!(decoded(&mut restarted, &key), None);
         assert_eq!(restarted.ttl(&key).expect("ttl after restart"), TtlState::NotFound);
+        let stats = restarted.stats();
+        assert!(stats.ttl_loaded_on_startup >= 1);
+        assert!(stats.ttl_pruned_on_startup >= 1);
     }
 
     cleanup(&wal_path);
@@ -298,6 +307,9 @@ fn hybrid_ttl_is_persisted_across_restart() {
             TtlState::Seconds(sec) => assert!(sec >= 1),
             other => panic!("unexpected ttl state: {other:?}"),
         }
+        let stats = restarted.stats();
+        assert!(stats.ttl_loaded_on_startup >= 1);
+        assert_eq!(stats.ttl_pruned_on_startup, 0);
     }
 
     cleanup(&wal_path);
@@ -321,7 +333,37 @@ fn hybrid_expired_while_down_remains_expired_after_restart() {
         let mut restarted = HybridStore::open(&wal_path).expect("reopen hybrid");
         assert_eq!(decoded(&mut restarted, &key), None);
         assert_eq!(restarted.ttl(&key).expect("ttl"), TtlState::NotFound);
+        let stats = restarted.stats();
+        assert!(stats.ttl_loaded_on_startup >= 1);
+        assert!(stats.ttl_pruned_on_startup >= 1);
     }
+
+    cleanup(&wal_path);
+}
+
+#[test]
+fn hybrid_cache_eviction_does_not_break_disk_truth() {
+    let wal_path = unique_wal_path("hybrid-cache-evict-disk-truth");
+    let k1 = KeyEncoding::Raw("hy:evict:1".to_string());
+    let k2 = KeyEncoding::Raw("hy:evict:2".to_string());
+
+    let mut store = HybridStore::open(&wal_path).expect("open hybrid");
+    store.set_cache_max_keys(1).expect("cache max 1");
+    store.set(k1.clone(), s("v1")).expect("set k1");
+    store.set(k2.clone(), s("v2")).expect("set k2");
+
+    assert_eq!(
+        store
+            .get_disk_only(&k1)
+            .map(|v| StringEncoding::decode(&v).to_display_string()),
+        Some("v1".to_string())
+    );
+    assert_eq!(
+        store
+            .get_disk_only(&k2)
+            .map(|v| StringEncoding::decode(&v).to_display_string()),
+        Some("v2".to_string())
+    );
 
     cleanup(&wal_path);
 }

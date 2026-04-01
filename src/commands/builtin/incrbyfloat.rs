@@ -30,13 +30,13 @@ impl Command for IncrByFloatCommand {
             return Err(invalid_input("float overflow"));
         }
 
-        ctx.store.set(key, StringEncoding::Float(next).encode())?;
+        ctx.kv().set(key, StringEncoding::Float(next).encode())?;
         Ok(CommandOutput::message(next.to_string()))
     }
 }
 
 fn current_f64(ctx: &mut CommandContext<'_>, key: &KeyEncoding) -> io::Result<f64> {
-    let Some(raw) = ctx.store.get(key) else { return Ok(0.0); };
+    let Some(raw) = ctx.kv().get(key) else { return Ok(0.0); };
 
     match StringEncoding::decode(raw) {
         StringEncoding::Int(v) => Ok(v as f64),

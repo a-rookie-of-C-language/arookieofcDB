@@ -15,7 +15,7 @@ impl Command for GetCommand {
     fn execute(&self, ctx: &mut CommandContext<'_>, args: &str) -> io::Result<CommandOutput> {
         let key = parse_key(first_arg(args), "missing key for get")?;
         let value = ctx
-            .store
+            .kv()
             .get(&key)
             .map(|v| crate::value_codec::StringEncoding::decode(v).to_display_string())
             .unwrap_or_else(|| String::from("(nil)"));

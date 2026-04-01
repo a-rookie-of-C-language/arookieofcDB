@@ -24,15 +24,15 @@ pub fn invalid_input(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg.to_string())
 }
 
-pub fn file_size_or_zero(path: &Path) -> u64 {
+pub(crate) fn file_size_or_zero(path: &Path) -> u64 {
     fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-pub fn file_size_or_zero_opt(path: Option<&Path>) -> u64 {
+pub(crate) fn file_size_or_zero_opt(path: Option<&Path>) -> u64 {
     path.map(file_size_or_zero).unwrap_or(0)
 }
 
-pub fn file_mtime_unix(path: &Path) -> Option<u64> {
+pub(crate) fn file_mtime_unix(path: &Path) -> Option<u64> {
     let modified = fs::metadata(path).ok()?.modified().ok()?;
     modified
         .duration_since(UNIX_EPOCH)
@@ -40,6 +40,6 @@ pub fn file_mtime_unix(path: &Path) -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-pub fn file_mtime_unix_opt(path: Option<&Path>) -> Option<u64> {
+pub(crate) fn file_mtime_unix_opt(path: Option<&Path>) -> Option<u64> {
     path.and_then(file_mtime_unix)
 }

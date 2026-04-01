@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 
@@ -24,11 +24,7 @@ impl Command for CacheMaxCommand {
         let raw = first_arg(args);
 
         if raw.is_none() {
-            let out = ctx
-                .store
-                .cache_max_keys()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| String::from("unsupported"));
+            let out = ctx.cache_max_keys_string();
             return Ok(CommandOutput::message(out));
         }
 
@@ -37,7 +33,7 @@ impl Command for CacheMaxCommand {
             .parse::<usize>()
             .map_err(|_| invalid_input("invalid max_keys: must be usize"))?;
 
-        ctx.store.set_cache_max_keys(max_keys)?;
+        ctx.cache_limits().set_cache_max_keys(max_keys)?;
         Ok(CommandOutput::message(format!("ok (cache_max_keys={max_keys})")))
     }
 }

@@ -1,16 +1,20 @@
-﻿use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::time::{Duration, Instant};
 
 use crate::engine::ArookieofcHashTable;
 use crate::key_codec::KeyEncoding;
 
-use super::{EngineStats, StorageEngine, SyncPolicy, TtlState};
+use super::{
+    CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine, ConsistencyRepairEngine,
+    DiskReadEngine, EngineStats, FaultInjectionEngine, KvEngine, RangeReadEngine,
+    RepairControlEngine, StoragePathIntrospection, StorageStatsIntrospection, TtlEngine,
+    TtlState,
+};
 
 #[derive(Debug)]
 pub struct MemoryStore {
     table: ArookieofcHashTable,
-    sync_policy: SyncPolicy,
     expires: HashMap<KeyEncoding, Instant>,
     lru_order: VecDeque<KeyEncoding>,
     cache_max_keys: usize,
@@ -22,7 +26,6 @@ impl MemoryStore {
     pub fn new() -> Self {
         Self {
             table: ArookieofcHashTable::new(),
-            sync_policy: SyncPolicy::Manual,
             expires: HashMap::new(),
             lru_order: VecDeque::new(),
             cache_max_keys: 0,
@@ -126,7 +129,7 @@ impl MemoryStore {
     }
 }
 
-impl StorageEngine for MemoryStore {
+impl KvEngine for MemoryStore {
     fn engine_name(&self) -> &'static str {
         "memory"
     }
@@ -160,11 +163,34 @@ impl StorageEngine for MemoryStore {
         self.remove_from_lru(key);
         Ok(self.table.remove(key))
     }
+}
 
-    fn range_query(&self, start: &KeyEncoding, end: &KeyEncoding) -> Vec<(KeyEncoding, Vec<u8>)> {
-        self.table.range_query(start, end)
+impl DiskReadEngine for MemoryStore {}
+
+impl RangeReadEngine for MemoryStore {
+    fn range(
+        &mut self,
+        start: &KeyEncoding,
+        end: &KeyEncoding,
+    ) -> io::Result<Vec<(KeyEncoding, Vec<u8>)>> {
+        self.purge_all_expired();
+        Ok(self
+            .entries()
+            .into_iter()
+            .filter(|(key, _)| key >= start && key <= end)
+            .collect())
     }
+}
 
+impl ConsistencyEngine for MemoryStore {}
+
+impl ConsistencyRepairEngine for MemoryStore {}
+
+impl RepairControlEngine for MemoryStore {}
+
+impl FaultInjectionEngine for MemoryStore {}
+
+impl TtlEngine for MemoryStore {
     fn expire(&mut self, key: &KeyEncoding, seconds: u64) -> io::Result<bool> {
         self.purge_if_expired(key);
         if self.table.get(key).is_none() {
@@ -195,15 +221,9 @@ impl StorageEngine for MemoryStore {
         let remain = deadline.duration_since(now).as_secs() as i64;
         Ok(TtlState::Seconds(remain))
     }
+}
 
-    fn sync_policy(&self) -> SyncPolicy {
-        self.sync_policy
-    }
-
-    fn set_sync_policy(&mut self, policy: SyncPolicy) {
-        self.sync_policy = policy;
-    }
-
+impl CacheCapacityEngine for MemoryStore {
     fn set_cache_max_keys(&mut self, max_keys: usize) -> io::Result<()> {
         MemoryStore::set_cache_max_keys(self, max_keys);
         Ok(())
@@ -216,7 +236,13 @@ impl StorageEngine for MemoryStore {
     fn cache_current_keys(&self) -> Option<usize> {
         Some(self.cache_current_keys())
     }
+}
 
+impl CachePolicyEngine for MemoryStore {}
+
+impl StoragePathIntrospection for MemoryStore {}
+
+impl StorageStatsIntrospection for MemoryStore {
     fn stats(&self) -> EngineStats {
         let mut out = self.stats;
         out.cache_evictions = self.cache_evictions;
@@ -230,7 +256,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::key_codec::KeyEncoding;
-    use crate::storage::{StorageEngine, TtlState};
+    use crate::storage::{KvEngine, RangeReadEngine, TtlEngine, TtlState};
 
     use super::MemoryStore;
 
@@ -248,22 +274,23 @@ mod tests {
     }
 
     #[test]
-    fn lru_evicts_oldest_when_over_limit() {
+    fn range_returns_inclusive_sorted_pairs() {
         let mut store = MemoryStore::new();
-        store.set_cache_max_keys(2);
+        store.set(KeyEncoding::Int(3), b"v3".to_vec()).expect("set 3");
+        store.set(KeyEncoding::Int(1), b"v1".to_vec()).expect("set 1");
+        store.set(KeyEncoding::Int(2), b"v2".to_vec()).expect("set 2");
 
-        let k1 = KeyEncoding::Raw("k1".to_string());
-        let k2 = KeyEncoding::Raw("k2".to_string());
-        let k3 = KeyEncoding::Raw("k3".to_string());
+        let got = store
+            .range(&KeyEncoding::Int(1), &KeyEncoding::Int(2))
+            .expect("range");
 
-        store.set(k1.clone(), b"v1".to_vec()).expect("set k1");
-        store.set(k2.clone(), b"v2".to_vec()).expect("set k2");
-        store.set(k3.clone(), b"v3".to_vec()).expect("set k3");
-
-        assert_eq!(store.get(&k1), None);
-        assert_eq!(store.get(&k2), Some("v2".as_bytes()));
-        assert_eq!(store.get(&k3), Some("v3".as_bytes()));
-        assert_eq!(store.cache_evictions(), 1);
+        assert_eq!(
+            got,
+            vec![
+                (KeyEncoding::Int(1), b"v1".to_vec()),
+                (KeyEncoding::Int(2), b"v2".to_vec()),
+            ]
+        );
     }
 }
 

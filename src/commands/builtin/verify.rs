@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::storage::{ConsistencyDiffKind, ConsistencyReport};
@@ -59,7 +59,7 @@ impl Command for VerifyCommand {
             ));
         }
 
-        let report = ctx.store.verify_consistency()?;
+        let report = ctx.consistency().verify_consistency()?;
         Ok(CommandOutput::message(Self::render(&report)))
     }
 }

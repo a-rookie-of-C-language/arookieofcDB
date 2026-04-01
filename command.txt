@@ -225,3 +225,24 @@ set rma:trigger y
 verify
 status
 # 预期: always = read + write，读/写都可触发自动修复
+
+# 20) TTL startup recovery stats (new)
+# target fields:
+# ttl_loaded_on_startup / ttl_pruned_on_startup
+engine wal
+set ttl:boot:alive v
+expire ttl:boot:alive 30
+set ttl:boot:dead v
+expire ttl:boot:dead 1
+status
+# exit, wait 2 seconds, restart, then run:
+# engine wal
+# status
+# get ttl:boot:alive
+# ttl ttl:boot:alive
+# get ttl:boot:dead
+# ttl ttl:boot:dead
+# expected:
+# ttl_loaded_on_startup >= 1
+# ttl_pruned_on_startup >= 1
+# alive key exists, dead key is gone

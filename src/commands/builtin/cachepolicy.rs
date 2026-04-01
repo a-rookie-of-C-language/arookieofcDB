@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 
@@ -24,11 +24,7 @@ impl Command for CachePolicyCommand {
         let raw = first_arg(args);
 
         if raw.is_none() {
-            let out = ctx
-                .store
-                .cache_policy()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| String::from("unsupported"));
+            let out = ctx.cache_policy_string();
             return Ok(CommandOutput::message(out));
         }
 
@@ -37,7 +33,7 @@ impl Command for CachePolicyCommand {
             return Err(invalid_input("invalid cache policy: use lru|none"));
         }
 
-        ctx.store.set_cache_policy(policy)?;
+        ctx.cache_config().set_cache_policy(policy)?;
         Ok(CommandOutput::message(format!("ok (cache_policy={})", policy.to_ascii_lowercase())))
     }
 }

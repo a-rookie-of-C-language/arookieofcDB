@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::storage::TtlState;
@@ -17,7 +17,7 @@ impl Command for TtlCommand {
         let mut parts = args.split_whitespace();
         let key = parse_key(parts.next(), "missing key for ttl")?;
 
-        let out = match ctx.store.ttl(&key)? {
+        let out = match ctx.ttl().ttl(&key)? {
             TtlState::NotFound => -2,
             TtlState::NoExpire => -1,
             TtlState::Seconds(sec) => sec,

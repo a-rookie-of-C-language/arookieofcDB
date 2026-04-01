@@ -15,7 +15,7 @@ mod set;
 mod status;
 mod ttl;
 mod update;
-mod utils;
+pub(crate) mod utils;
 mod delete;
 
 
@@ -28,4 +28,5 @@ mod fault;
 
 
 mod repairmode;
+mod range;
 

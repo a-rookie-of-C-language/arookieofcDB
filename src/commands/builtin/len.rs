@@ -19,7 +19,7 @@ impl Command for LenCommand {
     }
 
     fn execute(&self, ctx: &mut CommandContext<'_>, _args: &str) -> io::Result<CommandOutput> {
-        Ok(CommandOutput::message(ctx.store.len().to_string()))
+        Ok(CommandOutput::message(ctx.kv().len().to_string()))
     }
 }
 

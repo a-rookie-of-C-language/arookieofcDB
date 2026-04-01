@@ -28,27 +28,6 @@ impl ArookieofcHashTable {
         self.hash_table.remove(key)
     }
 
-    pub fn range_query(&self, start: &KeyEncoding, end: &KeyEncoding) -> Vec<(KeyEncoding, Vec<u8>)> {
-        if start > end {
-            return Vec::new();
-        }
-
-        let mut pairs = self
-            .hash_table
-            .iter()
-            .filter_map(|(k, v)| {
-                if k >= start && k <= end {
-                    Some((k.clone(), v.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        pairs.sort_by(|(ka, _), (kb, _)| ka.cmp(kb));
-        pairs
-    }
-
     pub fn entries(&self) -> Vec<(KeyEncoding, Vec<u8>)> {
         let mut pairs = self
             .hash_table

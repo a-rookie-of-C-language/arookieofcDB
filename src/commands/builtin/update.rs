@@ -18,12 +18,12 @@ impl Command for UpdateCommand {
         let key = parse_key(parts.next(), "missing key for update")?;
         let value = parts.next().map(str::trim_start).ok_or_else(|| invalid_input("missing value for update"))?;
 
-        if ctx.store.get(&key).is_none() {
+        if ctx.kv().get(&key).is_none() {
             return Ok(CommandOutput::message("0"));
         }
 
         let encoded = StringEncoding::from_input(value).encode();
-        ctx.store.set(key, encoded)?;
+        ctx.kv().set(key, encoded)?;
         Ok(CommandOutput::message("1"))
     }
 }

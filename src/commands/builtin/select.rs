@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 
@@ -25,11 +25,11 @@ impl Command for SelectCommand {
         let key = parse_key(key_raw, "missing key for select")?;
 
         let out = if force_disk {
-            ctx.store
+            ctx.disk_read()
                 .get_disk_only(&key)
                 .map(|v| crate::value_codec::StringEncoding::decode(&v).to_display_string())
         } else {
-            ctx.store
+            ctx.kv()
                 .get(&key)
                 .map(|v| crate::value_codec::StringEncoding::decode(v).to_display_string())
         }

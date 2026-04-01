@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::key_codec::KeyEncoding;
@@ -48,7 +48,7 @@ impl Command for FaultCommand {
         let key = KeyEncoding::from_input(key_raw);
         let value = StringEncoding::from_input(value_raw).encode();
 
-        ctx.store.inject_fault(target, key, value)?;
+        ctx.fault().inject_fault(target, key, value)?;
 
         let target_name = match target {
             FaultTarget::CacheOnly => "cache-only",

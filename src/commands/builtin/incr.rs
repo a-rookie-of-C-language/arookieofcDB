@@ -19,13 +19,13 @@ impl Command for IncrCommand {
         let current = current_i64(ctx, &key)?;
         let next = current.checked_add(1).ok_or_else(|| invalid_input("integer overflow"))?;
 
-        ctx.store.set(key, StringEncoding::Int(next).encode())?;
+        ctx.kv().set(key, StringEncoding::Int(next).encode())?;
         Ok(CommandOutput::message(next.to_string()))
     }
 }
 
 fn current_i64(ctx: &mut CommandContext<'_>, key: &KeyEncoding) -> io::Result<i64> {
-    let Some(raw) = ctx.store.get(key) else { return Ok(0); };
+    let Some(raw) = ctx.kv().get(key) else { return Ok(0); };
 
     match StringEncoding::decode(raw) {
         StringEncoding::Int(v) => Ok(v),

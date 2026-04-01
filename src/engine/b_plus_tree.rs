@@ -56,10 +56,6 @@ impl BPlusTree {
         self.len
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
     pub fn insert(&mut self, key: KeyEncoding, value: Vec<u8>) {
         let split = self.insert_recursive(self.root, key, value);
 

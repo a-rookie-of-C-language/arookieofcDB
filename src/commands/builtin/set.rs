@@ -17,7 +17,7 @@ impl Command for SetCommand {
         let value = parts.next().map(str::trim_start).ok_or_else(|| invalid_input("missing value for set"))?;
 
         let encoded = crate::value_codec::StringEncoding::from_input(value).encode();
-        ctx.store.set(key, encoded)?;
+        ctx.kv().set(key, encoded)?;
         Ok(CommandOutput::message("ok"))
     }
 }
