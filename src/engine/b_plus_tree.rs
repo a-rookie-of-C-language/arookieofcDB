@@ -1,26 +1,9 @@
-﻿use crate::key_codec::KeyEncoding;
+use crate::key_codec::KeyEncoding;
+use super::node::Node;
+use super::internal_node::InternalNode;
+use super::leaf_node::LeafNode;
 
 const DEFAULT_ORDER: usize = 4;
-
-#[derive(Debug, Clone)]
-enum Node {
-    Internal(InternalNode),
-    Leaf(LeafNode),
-}
-
-#[derive(Debug, Clone)]
-struct InternalNode {
-    // Separator keys, children.len() == keys.len() + 1
-    keys: Vec<KeyEncoding>,
-    children: Vec<usize>,
-}
-
-#[derive(Debug, Clone)]
-struct LeafNode {
-    keys: Vec<KeyEncoding>,
-    values: Vec<Vec<u8>>,
-    next: Option<usize>,
-}
 
 #[derive(Debug, Clone)]
 pub struct BPlusTree {

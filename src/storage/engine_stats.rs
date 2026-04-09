@@ -1,0 +1,22 @@
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EngineStats {
+    pub reads: u64,
+    pub writes: u64,
+    pub deletes: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub disk_reads: u64,
+    pub disk_writes: u64,
+    pub wal_appends: u64,
+    pub fsync_count: u64,
+    pub ttl_expired_in_cache: u64,
+    pub ttl_expired_on_disk: u64,
+    pub ttl_loaded_on_startup: u64,
+    pub ttl_pruned_on_startup: u64,
+    pub cache_repaired: u64,
+    pub cache_invalidated: u64,
+    pub cache_evictions: u64,
+    pub auto_repairs: u64,
+    pub auto_repairs_read: u64,
+    pub auto_repairs_write: u64,
+}
