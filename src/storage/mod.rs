@@ -1,6 +1,8 @@
 mod hybrid_store;
 mod memory_store;
 mod wal_store;
+pub mod disk_manager;
+pub mod buffer_pool;
 
 use std::io;
 use std::path::Path;
