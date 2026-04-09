@@ -139,13 +139,13 @@ impl KvEngine for MemoryStore {
         self.table.len()
     }
 
-    fn get(&mut self, key: &KeyEncoding) -> Option<&[u8]> {
+    fn get(&mut self, key: &KeyEncoding) -> Option<Vec<u8>> {
         self.stats.reads += 1;
         self.purge_if_expired(key);
         if self.table.get(key).is_some() {
             self.touch_key(key);
         }
-        self.table.get(key)
+        self.table.get(key).map(|v| v.to_vec())
     }
 
     fn set(&mut self, key: KeyEncoding, value: Vec<u8>) -> io::Result<()> {

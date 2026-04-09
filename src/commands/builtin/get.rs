@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 
@@ -17,7 +17,7 @@ impl Command for GetCommand {
         let value = ctx
             .kv()
             .get(&key)
-            .map(|v| crate::value_codec::StringEncoding::decode(v).to_display_string())
+            .map(|v| crate::value_codec::StringEncoding::decode(&v).to_display_string())
             .unwrap_or_else(|| String::from("(nil)"));
         Ok(CommandOutput::message(value))
     }

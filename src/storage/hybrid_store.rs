@@ -267,18 +267,18 @@ impl KvEngine for HybridStore {
         self.wal.len()
     }
 
-    fn get(&mut self, key: &KeyEncoding) -> Option<&[u8]> {
+    fn get(&mut self, key: &KeyEncoding) -> Option<Vec<u8>> {
         self.stats.reads += 1;
 
         if self.cache_policy == CachePolicy::None {
-            let (disk_ref, disk_expired) = self.wal.get_with_expiry_ref(key);
+            let (disk_val, disk_expired) = self.wal.get_with_expiry_ref(key);
             if disk_expired {
                 self.stats.ttl_expired_on_disk += 1;
             }
-            if disk_ref.is_some() {
+            if disk_val.is_some() {
                 self.stats.disk_reads += 1;
             }
-            return disk_ref;
+            return disk_val;
         }
 
         let (mem_value, mem_expired) = self.memory.get_with_expiry_flag(key);
@@ -299,7 +299,7 @@ impl KvEngine for HybridStore {
                 match disk_value {
                     Some(disk_value) => {
                         if disk_value != mem_value {
-                            if let Err(_) = self.memory.set(key.clone(), disk_value) {
+                            if let Err(_) = self.memory.set(key.clone(), disk_value.clone()) {
                                 let _ = self.memory.delete(key);
                                 return self.wal.get(key);
                             }
@@ -319,7 +319,7 @@ impl KvEngine for HybridStore {
                 }
             }
 
-            return self.memory.get(key);
+            return Some(mem_value);
         }
 
         self.stats.cache_misses += 1;
@@ -331,11 +331,11 @@ impl KvEngine for HybridStore {
 
         if let Some(v) = disk_value {
             self.stats.disk_reads += 1;
-            if let Err(_) = self.memory.set(key.clone(), v) {
+            if let Err(_) = self.memory.set(key.clone(), v.clone()) {
                 let _ = self.memory.delete(key);
                 return self.wal.get(key);
             }
-            return self.memory.get(key);
+            return Some(v);
         }
 
         None

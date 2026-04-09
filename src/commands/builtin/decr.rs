@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::key_codec::KeyEncoding;
@@ -27,7 +27,7 @@ impl Command for DecrCommand {
 fn current_i64(ctx: &mut CommandContext<'_>, key: &KeyEncoding) -> io::Result<i64> {
     let Some(raw) = ctx.kv().get(key) else { return Ok(0); };
 
-    match StringEncoding::decode(raw) {
+    match StringEncoding::decode(&raw) {
         StringEncoding::Int(v) => Ok(v),
         StringEncoding::Raw(bytes) => {
             let text = String::from_utf8_lossy(&bytes);

@@ -6,6 +6,7 @@ use super::disk_manager::{DiskManager, Page, PageId, PAGE_SIZE};
 
 pub type FrameId = usize;
 
+#[derive(Debug)]
 pub struct BufferPoolManager {
     disk_manager: DiskManager,
     frames: Vec<Arc<RwLock<Page>>>,

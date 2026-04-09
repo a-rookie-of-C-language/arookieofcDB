@@ -31,7 +31,7 @@ impl Command for SelectCommand {
         } else {
             ctx.kv()
                 .get(&key)
-                .map(|v| crate::value_codec::StringEncoding::decode(v).to_display_string())
+                .map(|v| crate::value_codec::StringEncoding::decode(&v).to_display_string())
         }
         .unwrap_or_else(|| String::from("(nil)"));
 

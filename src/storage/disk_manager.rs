@@ -6,6 +6,7 @@ pub const PAGE_SIZE: usize = 4096;
 pub type PageId = u32;
 
 /// A standard Database Page holding fixed size bytes
+#[derive(Debug)]
 pub struct Page {
     pub id: PageId,
     pub data: [u8; PAGE_SIZE],
@@ -24,7 +25,14 @@ impl Page {
     }
 }
 
+#[derive(Debug)]
 pub struct DiskManager {
+    file: File,
+    next_page_id: PageId,
+}
+
+#[derive(Debug)]
+pub struct BufferPoolManager {
     file: File,
     next_page_id: PageId,
 }

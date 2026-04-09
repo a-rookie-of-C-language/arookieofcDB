@@ -10,8 +10,11 @@ use super::{
     RepairControlEngine, StoragePathIntrospection, StorageStatsIntrospection, SyncPolicy,
     TtlEngine, TtlState,
 };
-use crate::engine::BPlusTree;
+use crate::engine::{BPlusTree, BPlusTreeMetadata};
 use crate::key_codec::KeyEncoding;
+use crate::storage::buffer_pool::BufferPoolManager;
+use crate::storage::disk_manager::DiskManager;
+use std::sync::{Arc, Mutex};
 
 const OP_SET_V1: u8 = 1;
 const OP_DELETE_V1: u8 = 2;
@@ -26,6 +29,7 @@ const SNAPSHOT_MAGIC_V3: &[u8; 9] = b"ARDBSNAP3";
 #[derive(Debug)]
 pub struct WalStore {
     tree: BPlusTree,
+    bpm: Arc<Mutex<BufferPoolManager>>,
     wal_path: PathBuf,
     snapshot_path: PathBuf,
     wal_file: File,
@@ -41,11 +45,18 @@ impl WalStore {
             fs::create_dir_all(parent)?;
         }
 
+        let data_path = wal_path.with_extension("data");
+        let disk_manager = DiskManager::new(&data_path)?;
+        let bpm = Arc::new(Mutex::new(BufferPoolManager::new(64, disk_manager))); // 64 pages buffer
+
         let snapshot_path = snapshot_path_for(&wal_path);
-        let mut tree = BPlusTree::new();
+        let mut tree = BPlusTree::new(Arc::clone(&bpm));
         let mut expires = HashMap::new();
 
         if snapshot_path.exists() {
+            // Note: In disk-based mode, we might still use snapshot for metadata
+            // but the primary data is in the .data file.
+            // For now, keeping legacy load for compatibility if needed.
             load_snapshot(&snapshot_path, &mut tree, &mut expires)?;
         }
 
@@ -64,6 +75,7 @@ impl WalStore {
 
         Ok(Self {
             tree,
+            bpm,
             wal_path,
             snapshot_path,
             wal_file,
@@ -89,7 +101,7 @@ impl WalStore {
         self.tree.len()
     }
 
-    pub fn get(&mut self, key: &KeyEncoding) -> Option<&[u8]> {
+    pub fn get(&mut self, key: &KeyEncoding) -> Option<Vec<u8>> {
         self.tree.get(key)
     }
 
@@ -102,7 +114,7 @@ impl WalStore {
         (value, expired_now)
     }
 
-    pub fn get_with_expiry_ref(&mut self, key: &KeyEncoding) -> (Option<&[u8]>, bool) {
+    pub fn get_with_expiry_ref(&mut self, key: &KeyEncoding) -> (Option<Vec<u8>>, bool) {
         let had_deadline = self.expires.contains_key(key);
         let existed_before = self.tree.get(key).is_some();
         self.purge_if_expired(key);
@@ -565,7 +577,7 @@ impl KvEngine for WalStore {
         WalStore::len(self)
     }
 
-    fn get(&mut self, key: &KeyEncoding) -> Option<&[u8]> {
+    fn get(&mut self, key: &KeyEncoding) -> Option<Vec<u8>> {
         self.stats.reads += 1;
         self.stats.disk_reads += 1;
         self.purge_if_expired(key);

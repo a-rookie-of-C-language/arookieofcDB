@@ -1,4 +1,4 @@
-﻿use std::io;
+use std::io;
 
 use crate::commands::base::{Command, CommandContext, CommandOutput};
 use crate::key_codec::KeyEncoding;
@@ -38,7 +38,7 @@ impl Command for IncrByFloatCommand {
 fn current_f64(ctx: &mut CommandContext<'_>, key: &KeyEncoding) -> io::Result<f64> {
     let Some(raw) = ctx.kv().get(key) else { return Ok(0.0); };
 
-    match StringEncoding::decode(raw) {
+    match StringEncoding::decode(&raw) {
         StringEncoding::Int(v) => Ok(v as f64),
         StringEncoding::Float(v) => Ok(v),
         StringEncoding::Raw(bytes) => {
