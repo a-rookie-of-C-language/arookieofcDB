@@ -218,6 +218,22 @@ pub trait TtlEngine {
     }
 }
 
+pub trait DurabilityEngine {
+    fn sync(&mut self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "durability sync is not supported by this engine",
+        ))
+    }
+
+    fn checkpoint(&mut self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "durability checkpoint is not supported by this engine",
+        ))
+    }
+}
+
 pub trait RangeReadEngine {
     fn range(
         &mut self,
@@ -294,6 +310,7 @@ pub trait StorageEngine:
     + RepairControlEngine
     + FaultInjectionEngine
     + TtlEngine
+    + DurabilityEngine
     + CacheConfigEngine
     + StorageIntrospection
 {
@@ -308,6 +325,7 @@ impl<T> StorageEngine for T where
         + RepairControlEngine
         + FaultInjectionEngine
         + TtlEngine
+        + DurabilityEngine
         + CacheConfigEngine
         + StorageIntrospection
 {

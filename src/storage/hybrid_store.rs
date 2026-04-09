@@ -6,9 +6,10 @@ use crate::key_codec::KeyEncoding;
 
 use super::{
     CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine, ConsistencyRepairEngine,
-    DiskReadEngine, EngineStats, FaultInjectionEngine, FaultTarget, KvEngine, MemoryStore,
-    RangeReadEngine, RepairControlEngine, RepairMode, RepairSummary,
-    StoragePathIntrospection, StorageStatsIntrospection, TtlEngine, TtlState, WalStore,
+    DiskReadEngine, DurabilityEngine, EngineStats, FaultInjectionEngine, FaultTarget,
+    KvEngine, MemoryStore, RangeReadEngine, RepairControlEngine, RepairMode,
+    RepairSummary, StoragePathIntrospection, StorageStatsIntrospection, TtlEngine,
+    TtlState, WalStore,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,14 +53,23 @@ impl HybridStore {
             .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
             .unwrap_or(false);
 
-        Self::open_with_mode(path, strict_read_check, if strict_read_check { RepairMode::Read } else { RepairMode::Off }, CachePolicy::Lru)
+        Self::open_with_mode(
+            path,
+            strict_read_check,
+            if strict_read_check {
+                RepairMode::Read
+            } else {
+                RepairMode::Off
+            },
+            CachePolicy::Lru,
+        )
     }
 
     fn open_with_mode(
         path: impl AsRef<Path>,
         strict_read_check: bool,
-    repair_mode: RepairMode,
-    cache_policy: CachePolicy,
+        repair_mode: RepairMode,
+        cache_policy: CachePolicy,
     ) -> io::Result<Self> {
         Ok(Self {
             memory: MemoryStore::new(),
@@ -74,11 +84,21 @@ impl HybridStore {
 
     #[cfg(test)]
     fn open_with_strict(path: impl AsRef<Path>, strict_read_check: bool) -> io::Result<Self> {
-        Self::open_with_mode(path, strict_read_check, if strict_read_check { RepairMode::Read } else { RepairMode::Off }, CachePolicy::Lru)
+        Self::open_with_mode(
+            path,
+            strict_read_check,
+            if strict_read_check {
+                RepairMode::Read
+            } else {
+                RepairMode::Off
+            },
+            CachePolicy::Lru,
+        )
     }
 
     fn read_repair_enabled(&self) -> bool {
-        self.strict_read_check || matches!(self.repair_mode, RepairMode::Read | RepairMode::Always)
+        self.strict_read_check 
+        || matches!(self.repair_mode, RepairMode::Read | RepairMode::Always)
     }
 
     fn write_repair_enabled(&self) -> bool {
@@ -91,7 +111,8 @@ impl HybridStore {
         }
 
         // Keep disk as source of truth and reconcile cache before write.
-        let report = self.run_repair_consistency(super::RepairTarget::Cache)?;
+        let report = self
+          .run_repair_consistency(super::RepairTarget::Cache)?;
         let repaired = report.total_repairs() as u64;
         self.stats.auto_repairs += repaired;
         self.stats.auto_repairs_write += repaired;
@@ -115,7 +136,10 @@ impl HybridStore {
                 for (key, cache_value) in &cache {
                     match disk.get(key) {
                         None => {
-                            self.wal.set(key.clone(), cache_value.clone())?;
+                            if let Err(_) = self.wal.set(key.clone(), cache_value.clone()) {
+                                let _ = self.memory.delete(key);
+                                continue;
+                            }
                             report.repaired_only_in_cache += 1;
                         }
                         Some(disk_value) if disk_value != cache_value => {
@@ -169,6 +193,10 @@ impl HybridStore {
 
     pub fn sync(&mut self) -> io::Result<()> {
         self.wal.sync()
+    }
+
+    pub fn checkpoint(&mut self) -> io::Result<()> {
+        self.wal.checkpoint()
     }
 
     fn snapshot_maps(&mut self) -> (HashMap<KeyEncoding, Vec<u8>>, HashMap<KeyEncoding, Vec<u8>>) {
@@ -271,7 +299,10 @@ impl KvEngine for HybridStore {
                 match disk_value {
                     Some(disk_value) => {
                         if disk_value != mem_value {
-                            let _ = self.memory.set(key.clone(), disk_value);
+                            if let Err(_) = self.memory.set(key.clone(), disk_value) {
+                                let _ = self.memory.delete(key);
+                                return self.wal.get(key);
+                            }
                             self.stats.cache_repaired += 1;
                             self.stats.auto_repairs += 1;
                             self.stats.auto_repairs_read += 1;
@@ -300,7 +331,10 @@ impl KvEngine for HybridStore {
 
         if let Some(v) = disk_value {
             self.stats.disk_reads += 1;
-            let _ = self.memory.set(key.clone(), v);
+            if let Err(_) = self.memory.set(key.clone(), v) {
+                let _ = self.memory.delete(key);
+                return self.wal.get(key);
+            }
             return self.memory.get(key);
         }
 
@@ -314,7 +348,10 @@ impl KvEngine for HybridStore {
         self.wal.set(key.clone(), value.clone())?;
 
         if self.cache_policy == CachePolicy::Lru {
-            self.memory.set(key, value)
+            if let Err(_) = self.memory.set(key.clone(), value) {
+                let _ = self.memory.delete(&key);
+            }
+            Ok(())
         } else {
             let _ = self.memory.delete(&key);
             Ok(())
@@ -325,7 +362,15 @@ impl KvEngine for HybridStore {
         self.maybe_auto_repair_on_write()?;
         self.stats.deletes += 1;
         let disk_deleted = self.wal.delete(key)?;
-        let mem_deleted = self.memory.delete(key)?;
+        
+        let mem_deleted = match self.memory.delete(key) {
+            Ok(v) => v,
+            Err(_) => {
+                self.memory.clear_cache();
+                None
+            }
+        };
+        
         if disk_deleted.is_some() {
             self.stats.disk_writes += 1;
         }
@@ -402,11 +447,23 @@ impl FaultInjectionEngine for HybridStore {
     }
 }
 
+impl DurabilityEngine for HybridStore {
+    fn sync(&mut self) -> io::Result<()> {
+        HybridStore::sync(self)
+    }
+
+    fn checkpoint(&mut self) -> io::Result<()> {
+        HybridStore::checkpoint(self)
+    }
+}
+
 impl TtlEngine for HybridStore {
     fn expire(&mut self, key: &KeyEncoding, seconds: u64) -> io::Result<bool> {
         let changed = self.wal.expire(key, seconds)?;
         if changed {
-            let _ = self.memory.expire(key, seconds)?;
+            if let Err(_) = self.memory.expire(key, seconds) {
+                let _ = self.memory.delete(key);
+            }
         }
         Ok(changed)
     }
@@ -483,9 +540,9 @@ mod tests {
 
     use crate::key_codec::KeyEncoding;
     use crate::storage::{
-        CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine,
-        ConsistencyRepairEngine, FaultInjectionEngine, KvEngine, RangeReadEngine,
-        RepairControlEngine, StorageStatsIntrospection, TtlEngine,
+        CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine, ConsistencyRepairEngine,
+        FaultInjectionEngine, KvEngine, RangeReadEngine, RepairControlEngine,
+        StorageStatsIntrospection, TtlEngine,
     };
 
     use super::HybridStore;
@@ -545,7 +602,9 @@ mod tests {
         let key = KeyEncoding::Raw("repair:key".to_string());
 
         let mut store = HybridStore::open_with_strict(&wal_path, true).expect("open strict hybrid");
-        store.set(key.clone(), b"fresh".to_vec()).expect("set fresh");
+        store
+            .set(key.clone(), b"fresh".to_vec())
+            .expect("set fresh");
 
         let _ = store.memory.set(key.clone(), b"stale".to_vec());
 
@@ -619,7 +678,8 @@ mod tests {
         assert!(stats_after_lru.cache_hits >= hits_before);
 
         cleanup(&wal_path);
-    }    #[test]
+    }
+    #[test]
     fn verify_detects_mismatch_and_repair_to_disk() {
         let wal_path = unique_wal_path();
         let key = KeyEncoding::Raw("vr:key".to_string());
@@ -663,7 +723,8 @@ mod tests {
         assert_eq!(report_after.total_issues(), 0);
 
         cleanup(&wal_path);
-    }    #[test]
+    }
+    #[test]
     fn fault_cache_only_creates_only_in_cache_issue() {
         let wal_path = unique_wal_path();
         let key = KeyEncoding::Raw("fault:cache".to_string());
@@ -701,7 +762,8 @@ mod tests {
         assert_eq!(report.only_in_disk, 1);
 
         cleanup(&wal_path);
-    }    #[test]
+    }
+    #[test]
     fn repair_mode_read_enables_auto_repair() {
         let wal_path = unique_wal_path();
         let key = KeyEncoding::Raw("rm:key".to_string());
@@ -709,18 +771,34 @@ mod tests {
         let mut store = HybridStore::open_with_strict(&wal_path, false).expect("open hybrid");
         store.set(key.clone(), b"disk".to_vec()).expect("set");
         store
-            .inject_fault(super::super::FaultTarget::CacheOnly, key.clone(), b"stale".to_vec())
+            .inject_fault(
+                super::super::FaultTarget::CacheOnly,
+                key.clone(),
+                b"stale".to_vec(),
+            )
             .expect("inject");
 
         assert_eq!(store.get(&key), Some("stale".as_bytes()));
-        assert!(store.verify_consistency().expect("verify off").total_issues() >= 1);
+        assert!(
+            store
+                .verify_consistency()
+                .expect("verify off")
+                .total_issues()
+                >= 1
+        );
 
         store
             .set_repair_mode(super::super::RepairMode::Read)
             .expect("set repair mode");
 
         assert_eq!(store.get(&key), Some("disk".as_bytes()));
-        assert_eq!(store.verify_consistency().expect("verify read").total_issues(), 0);
+        assert_eq!(
+            store
+                .verify_consistency()
+                .expect("verify read")
+                .total_issues(),
+            0
+        );
         assert!(store.stats().auto_repairs >= 1);
 
         cleanup(&wal_path);
@@ -734,9 +812,19 @@ mod tests {
         let mut store = HybridStore::open_with_strict(&wal_path, false).expect("open hybrid");
 
         store
-            .inject_fault(super::super::FaultTarget::DiskOnly, ghost.clone(), b"v".to_vec())
+            .inject_fault(
+                super::super::FaultTarget::DiskOnly,
+                ghost.clone(),
+                b"v".to_vec(),
+            )
             .expect("inject disk-only");
-        assert_eq!(store.verify_consistency().expect("verify before").only_in_disk, 1);
+        assert_eq!(
+            store
+                .verify_consistency()
+                .expect("verify before")
+                .only_in_disk,
+            1
+        );
 
         store
             .set_repair_mode(super::super::RepairMode::Write)
@@ -756,9 +844,15 @@ mod tests {
         let wal_path = unique_wal_path();
         let mut store = HybridStore::open(&wal_path).expect("open hybrid");
 
-        store.set(KeyEncoding::Int(3), b"v3".to_vec()).expect("set 3");
-        store.set(KeyEncoding::Int(1), b"v1".to_vec()).expect("set 1");
-        store.set(KeyEncoding::Int(2), b"v2".to_vec()).expect("set 2");
+        store
+            .set(KeyEncoding::Int(3), b"v3".to_vec())
+            .expect("set 3");
+        store
+            .set(KeyEncoding::Int(1), b"v1".to_vec())
+            .expect("set 1");
+        store
+            .set(KeyEncoding::Int(2), b"v2".to_vec())
+            .expect("set 2");
 
         let got = store
             .range(&KeyEncoding::Int(1), &KeyEncoding::Int(2))
@@ -775,11 +869,3 @@ mod tests {
         cleanup(&wal_path);
     }
 }
-
-
-
-
-
-
-
-

@@ -1,9 +1,9 @@
 use crate::commands::builtin::utils::{file_mtime_unix_opt, file_size_or_zero_opt};
 use crate::storage::{
     CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine,
-    ConsistencyRepairEngine, DiskReadEngine, EngineStats, FaultInjectionEngine, KvEngine,
-    RangeReadEngine, RepairControlEngine, RepairTarget, StorageEngine,
-    StorageIntrospection, TtlEngine,
+    ConsistencyRepairEngine, DiskReadEngine, DurabilityEngine, EngineStats,
+    FaultInjectionEngine, KvEngine, RangeReadEngine, RepairControlEngine, RepairTarget,
+    StorageEngine, StorageIntrospection, TtlEngine,
 };
 use std::io;
 
@@ -83,6 +83,10 @@ impl<'a> CommandContext<'a> {
     }
 
     pub fn ttl(&mut self) -> &mut dyn TtlEngine {
+        self.store
+    }
+
+    pub fn durability(&mut self) -> &mut dyn DurabilityEngine {
         self.store
     }
 

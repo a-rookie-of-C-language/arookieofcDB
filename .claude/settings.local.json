@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(cargo test:*)",
-      "Bash(powershell -NoProfile -Command '& { $files=@\\(\"D:/code/RustFiles/arookieofcDB/src/storage/mod.rs\",\"D:/code/RustFiles/arookieofcDB/src/storage/memory_store.rs\",\"D:/code/RustFiles/arookieofcDB/src/storage/wal_store.rs\",\"D:/code/RustFiles/arookieofcDB/src/storage/hybrid_store.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/base/mod.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/status.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/verify.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/repair.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/repairmode.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/fault.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/cachemax.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/cachepolicy.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/select.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/ttl.rs\",\"D:/code/RustFiles/arookieofcDB/src/commands/builtin/expire.rs\",\"D:/code/RustFiles/arookieofcDB/src/storage/consistency_tests.rs\"\\); $enc=New-Object System.Text.UTF8Encoding\\($false\\); foreach\\($f in $files\\){ $text=[System.IO.File]::ReadAllText\\($f\\); [System.IO.File]::WriteAllText\\($f,$text,$enc\\) }; Write-Output \"converted\" }')"
-    ]
-  }
-}

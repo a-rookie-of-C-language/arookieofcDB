@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{
     CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine, ConsistencyRepairEngine,
-    DiskReadEngine, EngineStats, FaultInjectionEngine, KvEngine, RangeReadEngine,
+    DiskReadEngine, DurabilityEngine, EngineStats, FaultInjectionEngine, KvEngine, RangeReadEngine,
     RepairControlEngine, StoragePathIntrospection, StorageStatsIntrospection, SyncPolicy,
     TtlEngine, TtlState,
 };
@@ -115,10 +115,19 @@ impl WalStore {
         self.stats.writes += 1;
         self.stats.disk_writes += 1;
 
-        append_set_v2(&mut self.wal_file, &key, &value)?;
+        let offset = self.wal_file.stream_position()?;
+        if let Err(e) = append_set_v2(&mut self.wal_file, &key, &value) {
+            self.wal_file.set_len(offset)?;
+            let _ = self.wal_file.seek(SeekFrom::Start(offset));
+            return Err(e);
+        }
         self.stats.wal_appends += 1;
 
-        self.after_wal_append()?;
+        if let Err(e) = self.after_wal_append() {
+            self.wal_file.set_len(offset)?;
+            let _ = self.wal_file.seek(SeekFrom::Start(offset));
+            return Err(e);
+        }
         self.expires.remove(&key);
         self.tree.insert(key, value);
         Ok(())
@@ -126,15 +135,28 @@ impl WalStore {
 
     pub fn delete(&mut self, key: &KeyEncoding) -> io::Result<Option<Vec<u8>>> {
         self.stats.deletes += 1;
-
-        let deleted = self.tree.delete(key);
-        if deleted.is_some() {
-            self.stats.disk_writes += 1;
-            append_delete_v2(&mut self.wal_file, key)?;
-            self.stats.wal_appends += 1;
-            self.after_wal_append()?;
+        if self.tree.get(key).is_none() {
+            self.expires.remove(key);
+            return Ok(None);
         }
+        let offset = self.wal_file.stream_position()?;
+        if let Err(e) = append_delete_v2(&mut self.wal_file, key) {
+            self.wal_file.set_len(offset)?;
+            let _ = self.wal_file.seek(SeekFrom::Start(offset));
+            return Err(e);
+        }
+        self.stats.wal_appends += 1;
+
+        if let Err(e) = self.after_wal_append() { // fsync 策略点
+            self.wal_file.set_len(offset)?;
+            let _ = self.wal_file.seek(SeekFrom::Start(offset));
+            return Err(e);
+        }
+
+        self.stats.disk_writes += 1;
+        let deleted = self.tree.delete(key);
         self.expires.remove(key);
+
         Ok(deleted)
     }
 
@@ -250,7 +272,10 @@ fn read_key_blob_opt<R: Read>(reader: &mut R) -> io::Result<Option<KeyEncoding>>
     };
 
     let key = KeyEncoding::decode(&key_raw).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "invalid encoded key in wal/snapshot")
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid encoded key in wal/snapshot",
+        )
     })?;
 
     Ok(Some(key))
@@ -522,8 +547,12 @@ fn read_key_blob(reader: &mut BufReader<File>) -> io::Result<KeyEncoding> {
     let len = read_u32(reader)? as usize;
     let mut key_raw = vec![0u8; len];
     reader.read_exact(&mut key_raw)?;
-    KeyEncoding::decode(&key_raw)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid encoded key in snapshot"))
+    KeyEncoding::decode(&key_raw).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid encoded key in snapshot",
+        )
+    })
 }
 
 impl KvEngine for WalStore {
@@ -587,6 +616,16 @@ impl CacheCapacityEngine for WalStore {}
 
 impl CachePolicyEngine for WalStore {}
 
+impl DurabilityEngine for WalStore {
+    fn sync(&mut self) -> io::Result<()> {
+        WalStore::sync(self)
+    }
+
+    fn checkpoint(&mut self) -> io::Result<()> {
+        WalStore::checkpoint(self)
+    }
+}
+
 impl TtlEngine for WalStore {
     fn expire(&mut self, key: &KeyEncoding, seconds: u64) -> io::Result<bool> {
         self.purge_if_expired(key);
@@ -595,10 +634,21 @@ impl TtlEngine for WalStore {
         }
 
         let deadline_ms = now_unix_ms().saturating_add(seconds.saturating_mul(1000));
-        append_expire_v2(&mut self.wal_file, key, deadline_ms)?;
+        let offset = self.wal_file.stream_position()?;
+
+        if let Err(e) = append_expire_v2(&mut self.wal_file, key, deadline_ms) {
+            self.wal_file.set_len(offset)?;
+            let _ = self.wal_file.seek(SeekFrom::Start(offset));
+            return Err(e);
+        }
         self.stats.wal_appends += 1;
         self.stats.disk_writes += 1;
-        self.after_wal_append()?;
+
+        if let Err(e) = self.after_wal_append() {
+            self.wal_file.set_len(offset)?;
+            let _ = self.wal_file.seek(SeekFrom::Start(offset));
+            return Err(e);
+        }
 
         self.expires.insert(key.clone(), deadline_ms);
         Ok(true)
@@ -673,7 +723,9 @@ mod tests {
 
         {
             let mut store = WalStore::open(&wal_path).expect("open store");
-            store.set(KeyEncoding::Int(1), b"v1".to_vec()).expect("set 1");
+            store
+                .set(KeyEncoding::Int(1), b"v1".to_vec())
+                .expect("set 1");
             store
                 .set(KeyEncoding::Raw("user:2".to_string()), b"v2".to_vec())
                 .expect("set 2");
@@ -700,7 +752,9 @@ mod tests {
 
         {
             let mut store = WalStore::open(&wal_path).expect("open store");
-            store.set(KeyEncoding::Int(1), b"v1".to_vec()).expect("set 1");
+            store
+                .set(KeyEncoding::Int(1), b"v1".to_vec())
+                .expect("set 1");
             store
                 .set(KeyEncoding::Raw("k2".to_string()), b"v2".to_vec())
                 .expect("set 2");
@@ -801,9 +855,15 @@ mod tests {
 
         {
             let mut store = WalStore::open(&wal_path).expect("open store");
-            store.set(KeyEncoding::Int(3), b"v3".to_vec()).expect("set 3");
-            store.set(KeyEncoding::Int(1), b"v1".to_vec()).expect("set 1");
-            store.set(KeyEncoding::Int(2), b"v2".to_vec()).expect("set 2");
+            store
+                .set(KeyEncoding::Int(3), b"v3".to_vec())
+                .expect("set 3");
+            store
+                .set(KeyEncoding::Int(1), b"v1".to_vec())
+                .expect("set 1");
+            store
+                .set(KeyEncoding::Int(2), b"v2".to_vec())
+                .expect("set 2");
 
             let got = store
                 .range(&KeyEncoding::Int(1), &KeyEncoding::Int(2))
@@ -821,9 +881,3 @@ mod tests {
         cleanup(&wal_path);
     }
 }
-
-
-
-
-
-

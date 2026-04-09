@@ -7,9 +7,9 @@ use crate::key_codec::KeyEncoding;
 
 use super::{
     CacheCapacityEngine, CachePolicyEngine, ConsistencyEngine, ConsistencyRepairEngine,
-    DiskReadEngine, EngineStats, FaultInjectionEngine, KvEngine, RangeReadEngine,
-    RepairControlEngine, StoragePathIntrospection, StorageStatsIntrospection, TtlEngine,
-    TtlState,
+    DiskReadEngine, DurabilityEngine, EngineStats, FaultInjectionEngine, KvEngine,
+    RangeReadEngine, RepairControlEngine, StoragePathIntrospection,
+    StorageStatsIntrospection, TtlEngine, TtlState,
 };
 
 #[derive(Debug)]
@@ -189,6 +189,8 @@ impl ConsistencyRepairEngine for MemoryStore {}
 impl RepairControlEngine for MemoryStore {}
 
 impl FaultInjectionEngine for MemoryStore {}
+
+impl DurabilityEngine for MemoryStore {}
 
 impl TtlEngine for MemoryStore {
     fn expire(&mut self, key: &KeyEncoding, seconds: u64) -> io::Result<bool> {
