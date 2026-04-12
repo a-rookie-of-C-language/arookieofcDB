@@ -1,5 +1,5 @@
-
+use arookieofcDB::ioc::application::Application;
 
 fn main() {
-    println!("Hello, world!");
+    Application::run();
 }

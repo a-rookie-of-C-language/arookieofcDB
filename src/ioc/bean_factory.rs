@@ -1,4 +1,4 @@
-use super::bean_definition::{BeanDefinition, BeanScope, SharedBean};
+use super::bean_definition::{BeanDefinition,SharedBean};
 
 pub trait BeanFactory: Send + Sync {
     fn get_bean(&self, name: &str) -> Option<SharedBean>;
