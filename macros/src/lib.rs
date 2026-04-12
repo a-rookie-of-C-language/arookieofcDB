@@ -5,6 +5,11 @@ mod getter;
 mod setter;
 mod no_arg_constructor;
 mod accessors;
+mod bean;
+mod component;
+mod scope;
+
+
 
 #[proc_macro_attribute]
 pub fn data(attribute: TokenStream, item: TokenStream) -> TokenStream {
@@ -29,4 +34,13 @@ pub fn no_arg_constructor(attribute: TokenStream, item: TokenStream) -> TokenStr
 #[proc_macro_attribute]
 pub fn all_args_constructor(attribute: TokenStream, item: TokenStream) -> TokenStream {
     all_args_constructor::all_args_constructor_impl(attribute, item)
+}
+
+#[proc_macro_attribute]
+pub fn bean(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    bean::bean_impl(attribute, item)
+}
+#[proc_macro_attribute]
+pub fn component(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    component::component_impl(attribute, item)
 }

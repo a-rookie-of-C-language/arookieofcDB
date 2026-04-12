@@ -1,5 +1,4 @@
-pub mod base;
-mod builtin;
-
-pub use base::CommandRegistry;
-pub use base::CommandSignal;
+pub mod buildin;
+pub mod base_args;
+pub mod base_command;
+pub mod command_register;
