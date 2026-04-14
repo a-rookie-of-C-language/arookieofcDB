@@ -1,5 +1,6 @@
 use std::io;
 
+#[derive(Debug)]
 pub enum WalError {
     IOError(io::Error),
     Corrupted(String),
@@ -7,4 +8,12 @@ pub enum WalError {
     UnexpectedEof,
     FileNotFound,
     ChecksumMismatch,
+    InvalidHeader(String),
+    InvalidPath,
+}
+
+impl From<io::Error> for WalError {
+    fn from(e: io::Error) -> Self {
+        WalError::IOError(e)
+    }
 }

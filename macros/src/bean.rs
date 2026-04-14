@@ -19,8 +19,8 @@ pub fn bean_impl(attribute: TokenStream, item: TokenStream) -> TokenStream {
 
     // scope
     let scope_token = match args.scope.as_deref().unwrap_or("singleton") {
-        "singleton" => quote! { spring_beans::factory::config::BeanScope::Singleton },
-        "prototype" => quote! { spring_beans::factory::config::BeanScope::Prototype },
+        "singleton" => quote! { crate::ioc::BeanScope::Singleton },
+        "prototype" => quote! { crate::ioc::BeanScope::Prototype },
         other => {
             return syn::Error::new(
                 Span::call_site(),
@@ -55,9 +55,9 @@ pub fn bean_impl(attribute: TokenStream, item: TokenStream) -> TokenStream {
 
         // 向全局注册表提交 BeanRegistration
         inventory::submit! {
-            spring_beans::registry::BeanRegistration {
+            crate::ioc::BeanRegistration {
                 definition: || {
-                    spring_beans::factory::config::RootBeanDefinition::new(
+                    crate::ioc::RootBeanDefinition::new(
                         #name_lit.to_string(),
                         std::any::TypeId::of::<#ret_ty>(),
                         #scope_token,
