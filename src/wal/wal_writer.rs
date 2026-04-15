@@ -120,7 +120,7 @@ impl WalWriter {
         let entry = LogEntry::new(
             seq,
             EntryType::Checkpoint,
-            crate::wal::types::opration_type::OprationType::Insert,
+            OprationType::Insert,
             Vec::new(),
             Vec::new(),
             checksum,
