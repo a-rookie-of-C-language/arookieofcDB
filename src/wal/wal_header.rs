@@ -1,7 +1,7 @@
 use crate::wal::errors::WalError;
 use macros::{all_args_constructor, getter};
 
-const HEADER_SIZE: usize = 48;
+const HEADER_SIZE: usize = 36;
 const MAGIC_SIZE: usize = 16;
 
 #[getter]

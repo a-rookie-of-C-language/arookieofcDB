@@ -19,9 +19,9 @@ impl LogEntry {
         bytes.extend(self.seq.to_be_bytes());
         bytes.extend(u8::from(self.entry_type).to_be_bytes());
         bytes.extend(u8::from(self.opration_type).to_be_bytes());
-        bytes.extend(self.key.len().to_be_bytes());
+        bytes.extend((self.key.len() as u32).to_be_bytes());
         bytes.extend(&self.key);
-        bytes.extend(self.value.len().to_be_bytes());
+        bytes.extend((self.value.len() as u32).to_be_bytes());
         bytes.extend(&self.value);
         bytes.extend(self.checksum.to_be_bytes());
         bytes.extend(self.timestamp.to_be_bytes());
@@ -90,18 +90,18 @@ impl LogEntry {
         computed == self.checksum
     }
 
-    fn build_entry_data(seq: u64, key: &[u8], value: &[u8], timestamp: u64) -> Vec<u8> {
+    pub fn build_entry_data(seq: u64, key: &[u8], value: &[u8], timestamp: u64) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend(seq.to_be_bytes());
-        data.extend(key.len().to_be_bytes());
+        data.extend((key.len() as u32).to_be_bytes());
         data.extend(key);
-        data.extend(value.len().to_be_bytes());
+        data.extend((value.len() as u32).to_be_bytes());
         data.extend(value);
         data.extend(timestamp.to_be_bytes());
         data
     }
 
-    fn crc32(data: &[u8]) -> u32 {
+    pub fn crc32(data: &[u8]) -> u32 {
         let mut crc = 0xFFFFFFFFu32;
         for &byte in data {
             crc ^= byte as u32;

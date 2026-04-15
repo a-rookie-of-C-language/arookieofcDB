@@ -3,3 +3,4 @@ compares/*
 data/**
 agents.md
 trade-off.md
+*.db

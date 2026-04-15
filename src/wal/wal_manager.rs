@@ -10,7 +10,7 @@ use crate::wal::types::opration_type::OprationType;
 use crate::wal::wal_config::WalConfig;
 use crate::wal::wal_header::WalHeader;
 
-const HEADER_SIZE: usize = 48;
+const HEADER_SIZE: usize = 36;
 
 pub struct WalManager {
     config: WalConfig,
@@ -125,7 +125,7 @@ impl WalManager {
             return Ok(());
         }
 
-        let mut last_seq = self.start_sequence;
+        let mut last_seq = self.start_sequence - 1;
 
         for file_name in files {
             let file_path = self.config.wal_dir.join(&file_name);
@@ -214,8 +214,8 @@ impl WalManager {
             .unwrap()
             .as_millis() as u64;
 
-        let data = Self::build_entry_data(seq, key, value, timestamp);
-        let checksum = Self::crc32(&data);
+        let data = LogEntry::build_entry_data(seq, key, value, timestamp);
+        let checksum = LogEntry::crc32(&data);
 
         let entry = LogEntry::new(
             seq,
@@ -253,8 +253,8 @@ impl WalManager {
             .unwrap()
             .as_millis() as u64;
 
-        let data = Self::build_entry_data(seq, b"", b"", timestamp);
-        let checksum = Self::crc32(&data);
+        let data = LogEntry::build_entry_data(seq, b"", b"", timestamp);
+        let checksum = LogEntry::crc32(&data);
 
         let entry = LogEntry::new(
             seq,
@@ -301,39 +301,13 @@ impl WalManager {
                 removed_count += 1;
             }
 
-            if file_number < self.current_file_number - self.config.max_retained_files as u64 {
+            if file_number + (self.config.max_retained_files as u64) < self.current_file_number {
                 fs::remove_file(&file_path).map_err(|e| WalError::IOError(e))?;
                 removed_count += 1;
             }
         }
 
         Ok(removed_count)
-    }
-
-    fn build_entry_data(seq: u64, key: &[u8], value: &[u8], timestamp: u64) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend(seq.to_be_bytes());
-        data.extend(key.len().to_be_bytes());
-        data.extend(key);
-        data.extend(value.len().to_be_bytes());
-        data.extend(value);
-        data.extend(timestamp.to_be_bytes());
-        data
-    }
-
-    fn crc32(data: &[u8]) -> u32 {
-        let mut crc = 0xFFFFFFFFu32;
-        for &byte in data {
-            crc ^= byte as u32;
-            for _ in 0..8 {
-                crc = if crc & 1 != 0 {
-                    (crc >> 1) ^ 0xEDB88320
-                } else {
-                    crc >> 1
-                };
-            }
-        }
-        !crc
     }
 
     pub fn current_sequence(&self) -> u64 {

@@ -79,8 +79,8 @@ impl WalWriter {
             .unwrap()
             .as_millis() as u64;
 
-        let data = Self::build_entry_data(seq, key, value, timestamp);
-        let checksum = Self::crc32(&data);
+        let data = LogEntry::build_entry_data(seq, key, value, timestamp);
+        let checksum = LogEntry::crc32(&data);
 
         let entry = LogEntry::new(
             seq,
@@ -114,8 +114,8 @@ impl WalWriter {
             .unwrap()
             .as_millis() as u64;
 
-        let data = Self::build_entry_data(seq, b"", b"", timestamp);
-        let checksum = Self::crc32(&data);
+        let data = LogEntry::build_entry_data(seq, b"", b"", timestamp);
+        let checksum = LogEntry::crc32(&data);
 
         let entry = LogEntry::new(
             seq,
@@ -138,32 +138,6 @@ impl WalWriter {
             .map_err(|e| WalError::IOError(e))?;
 
         Ok(seq)
-    }
-
-    fn build_entry_data(seq: u64, key: &[u8], value: &[u8], timestamp: u64) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend(seq.to_be_bytes());
-        data.extend(key.len().to_be_bytes());
-        data.extend(key);
-        data.extend(value.len().to_be_bytes());
-        data.extend(value);
-        data.extend(timestamp.to_be_bytes());
-        data
-    }
-
-    fn crc32(data: &[u8]) -> u32 {
-        let mut crc = 0xFFFFFFFFu32;
-        for &byte in data {
-            crc ^= byte as u32;
-            for _ in 0..8 {
-                crc = if crc & 1 != 0 {
-                    (crc >> 1) ^ 0xEDB88320
-                } else {
-                    crc >> 1
-                };
-            }
-        }
-        !crc
     }
 
     pub fn current_sequence(&self) -> u64 {

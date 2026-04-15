@@ -7,7 +7,7 @@ use crate::wal::log_entry::LogEntry;
 use crate::wal::wal_config::WalConfig;
 use crate::wal::wal_header::WalHeader;
 
-const HEADER_SIZE: usize = 48;
+const HEADER_SIZE: usize = 36;
 
 pub struct WalReader {
     config: WalConfig,
@@ -39,7 +39,7 @@ impl WalReader {
             files,
             current_file_index: 0,
             current_file: Some(current_file),
-            current_sequence: start_sequence,
+            current_sequence: 0,
             file_offset: HEADER_SIZE as u64,
             start_sequence,
             file_size,
@@ -110,9 +110,10 @@ impl WalReader {
             Self::open_file(&self.config.wal_dir, file_name)?;
 
         self.current_file = Some(file);
-        self.current_sequence = start_sequence;
+        self.current_sequence = 0;
         self.file_offset = HEADER_SIZE as u64;
         self.file_size = file_size;
+        self.start_sequence = start_sequence;
 
         Ok(true)
     }
@@ -184,7 +185,7 @@ impl WalReader {
         }
     }
 
-    pub fn seek_to(&mut self, sequence: u64) -> Result<(), WalError> {
+    pub fn seek_to(&mut self, sequence: u64) -> Result<Option<LogEntry>, WalError> {
         if sequence < self.start_sequence {
             return Err(WalError::InvalidHeader(format!(
                 "sequence {} before start sequence {}",
@@ -197,17 +198,13 @@ impl WalReader {
             Self::open_file(&self.config.wal_dir, &self.files[0])?;
 
         self.current_file = Some(file);
-        self.current_sequence = start_sequence;
+        self.current_sequence = 0;
         self.file_offset = HEADER_SIZE as u64;
         self.file_size = file_size;
 
         loop {
-            if self.current_sequence >= sequence {
-                break;
-            }
-
-            match self.read_entry() {
-                Ok(Some(_)) => continue,
+            let entry = match self.read_entry() {
+                Ok(Some(e)) => e,
                 Ok(None) => {
                     return Err(WalError::InvalidHeader(format!(
                         "sequence {} not found",
@@ -215,10 +212,17 @@ impl WalReader {
                     )));
                 }
                 Err(e) => return Err(e),
+            };
+
+            if entry.seq == sequence {
+                return Ok(Some(entry));
+            } else if entry.seq > sequence {
+                return Err(WalError::InvalidHeader(format!(
+                    "sequence {} not found",
+                    sequence
+                )));
             }
         }
-
-        Ok(())
     }
 
     pub fn reset(&mut self) -> Result<(), WalError> {
@@ -231,7 +235,7 @@ impl WalReader {
             Self::open_file(&self.config.wal_dir, &self.files[0])?;
 
         self.current_file = Some(file);
-        self.current_sequence = start_sequence;
+        self.current_sequence = 0;
         self.file_offset = HEADER_SIZE as u64;
         self.file_size = file_size;
 

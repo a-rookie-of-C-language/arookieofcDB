@@ -8,7 +8,7 @@ use crate::wal::errors::WalError;
 use crate::wal::wal_config::WalConfig;
 
 const CHECKPOINT_HEADER_SIZE: usize = 40;
-const CHECKPOINT_MAGIC: &[u8; 8] = b"AROOKIED";
+const CHECKPOINT_MAGIC: &[u8; 12] = b"arookieofcDB";
 
 #[derive(Debug)]
 pub struct Checkpoint {
@@ -43,9 +43,9 @@ impl Checkpoint {
         bytes.extend(self.entry_count.to_be_bytes());
 
         for (key, value) in &self.data {
-            bytes.extend(key.len().to_be_bytes());
+            bytes.extend((key.len() as u32).to_be_bytes());
             bytes.extend(key);
-            bytes.extend(value.len().to_be_bytes());
+            bytes.extend((value.len() as u32).to_be_bytes());
             bytes.extend(value);
         }
 
@@ -58,12 +58,12 @@ impl Checkpoint {
         }
 
         let mut offset = 0;
-        let mut magic = [0u8; 8];
-        magic.copy_from_slice(&bytes[offset..offset + 8]);
+        let mut magic = [0u8; 12];
+        magic.copy_from_slice(&bytes[offset..offset + 12]);
         if magic != *CHECKPOINT_MAGIC {
             return Err(WalError::InvalidHeader("invalid checkpoint magic".to_string()));
         }
-        offset += 8;
+        offset += 12;
 
         let version = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap());
         offset += 4;
