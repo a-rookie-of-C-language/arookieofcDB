@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 inventory = "0.3"
 macros = { path = "./macros" }
+dashmap = "5.5"
+bytes = "1.5"

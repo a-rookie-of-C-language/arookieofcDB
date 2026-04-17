@@ -68,11 +68,6 @@ impl DbEngine {
         );
         
         let entry_bytes = entry.to_bytes();
-        
-        if wal_manager.file_offset() + entry_bytes.len() as u64 > self.config.max_file_size {
-            wal_manager.roll_file()?;
-        }
-        
         wal_manager.write_raw_entry(&entry_bytes)?;
         
         let result = self.memory_store.delete(key);
@@ -88,13 +83,15 @@ impl DbEngine {
     }
 
     pub fn create_checkpoint(&self) -> Result<u64, WalError> {
+        let mut wal_manager = self.wal_manager.lock().unwrap();
+        wal_manager.flush_buffer()?;
+        
         let data: std::collections::HashMap<Vec<u8>, Vec<u8>> = self.memory_store.iter().into_iter().collect();
-        let sequence = self.wal_manager.lock().unwrap().current_sequence() - 1;
+        let sequence = wal_manager.current_sequence() - 1;
         
         let checkpoint = Checkpoint::new(sequence, data);
         self.checkpoint_manager.save_checkpoint(&checkpoint)?;
         
-        let mut wal_manager = self.wal_manager.lock().unwrap();
         wal_manager.cleanup_old_files(sequence)?;
         
         Ok(sequence)

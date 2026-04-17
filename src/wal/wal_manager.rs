@@ -11,6 +11,7 @@ use crate::wal::wal_config::WalConfig;
 use crate::wal::wal_header::WalHeader;
 
 const HEADER_SIZE: usize = 36;
+const DEFAULT_BUFFER_CAPACITY: usize = 64 * 1024; // 64KB buffer
 
 pub struct WalManager {
     config: WalConfig,
@@ -19,6 +20,8 @@ pub struct WalManager {
     current_sequence: u64,
     file_offset: u64,
     start_sequence: u64,
+    write_buffer: Vec<u8>,
+    buffer_threshold: usize,
 }
 
 impl WalManager {
@@ -78,6 +81,8 @@ impl WalManager {
             current_sequence: start_sequence,
             file_offset,
             start_sequence,
+            write_buffer: Vec::with_capacity(DEFAULT_BUFFER_CAPACITY),
+            buffer_threshold: DEFAULT_BUFFER_CAPACITY,
         };
 
         manager.load_last_sequence()?;
@@ -183,6 +188,8 @@ impl WalManager {
     }
 
     pub fn roll_file(&mut self) -> Result<(), WalError> {
+        self.flush_buffer()?;
+
         self.current_file_number += 1;
         let mut new_file = Self::create_new_file(&self.config.wal_dir, self.current_file_number)?;
 
@@ -228,34 +235,48 @@ impl WalManager {
         );
 
         let entry_bytes = entry.to_bytes();
-
-        if self.file_offset + entry_bytes.len() as u64 > self.config.max_file_size {
-            self.roll_file()?;
-        }
-
-        self.current_file
-            .write_all(&entry_bytes)
-            .map_err(|e| WalError::IOError(e))?;
-        self.current_file
-            .sync_all()
-            .map_err(|e| WalError::IOError(e))?;
+        self.append_to_buffer(&entry_bytes)?;
 
         self.current_sequence += 1;
-        self.file_offset += entry_bytes.len() as u64;
 
         Ok(seq)
     }
 
     pub fn write_raw_entry(&mut self, entry_bytes: &[u8]) -> Result<(), WalError> {
+        self.append_to_buffer(entry_bytes)?;
+        self.current_sequence += 1;
+        Ok(())
+    }
+
+    fn append_to_buffer(&mut self, entry_bytes: &[u8]) -> Result<(), WalError> {
+        if self.write_buffer.len() + entry_bytes.len() > self.buffer_threshold {
+            self.flush_buffer()?;
+        }
+
+        if self.file_offset + self.write_buffer.len() as u64 + entry_bytes.len() as u64 > self.config.max_file_size {
+            self.flush_buffer()?;
+            self.roll_file()?;
+        }
+
+        self.write_buffer.extend_from_slice(entry_bytes);
+        self.file_offset += entry_bytes.len() as u64;
+
+        Ok(())
+    }
+
+    pub fn flush_buffer(&mut self) -> Result<(), WalError> {
+        if self.write_buffer.is_empty() {
+            return Ok(());
+        }
+
         self.current_file
-            .write_all(entry_bytes)
+            .write_all(&self.write_buffer)
             .map_err(|e| WalError::IOError(e))?;
         self.current_file
             .sync_all()
             .map_err(|e| WalError::IOError(e))?;
 
-        self.current_sequence += 1;
-        self.file_offset += entry_bytes.len() as u64;
+        self.write_buffer.clear();
 
         Ok(())
     }
@@ -281,62 +302,44 @@ impl WalManager {
         );
 
         let entry_bytes = entry.to_bytes();
-
-        if self.file_offset + entry_bytes.len() as u64 > self.config.max_file_size {
-            self.roll_file()?;
-        }
-
-        self.current_file
-            .write_all(&entry_bytes)
-            .map_err(|e| WalError::IOError(e))?;
-        self.current_file
-            .sync_all()
-            .map_err(|e| WalError::IOError(e))?;
+        self.append_to_buffer(&entry_bytes)?;
 
         Ok(seq)
     }
 
-    pub fn cleanup_old_files(&mut self, last_checkpoint_seq: u64) -> Result<usize, WalError> {
+    pub fn cleanup_old_files(&mut self, checkpoint_sequence: u64) -> Result<(), WalError> {
         let files = Self::list_wal_files(&self.config.wal_dir)?;
-        let mut removed_count = 0;
 
         for file_name in files {
-            let file_path = self.config.wal_dir.join(&file_name);
-            let file_number = Self::parse_file_number(&file_name)?;
-
-            let mut file = File::open(&file_path).map_err(|e| WalError::IOError(e))?;
-            let mut header_bytes = [0u8; HEADER_SIZE];
-            file.read_exact(&mut header_bytes)
-                .map_err(|e| WalError::IOError(e))?;
-            let header = WalHeader::from_bytes(&header_bytes)?;
-
-            if header.get_start_sequence() + 10000 < last_checkpoint_seq {
-                fs::remove_file(&file_path).map_err(|e| WalError::IOError(e))?;
-                removed_count += 1;
-            }
+            let file_number = match Self::parse_file_number(&file_name) {
+                Ok(num) => num,
+                Err(_) => continue,
+            };
 
             if file_number + (self.config.max_retained_files as u64) < self.current_file_number {
+                let file_path = self.config.wal_dir.join(&file_name);
                 fs::remove_file(&file_path).map_err(|e| WalError::IOError(e))?;
-                removed_count += 1;
             }
         }
 
-        Ok(removed_count)
+        Ok(())
     }
 
     pub fn current_sequence(&self) -> u64 {
         self.current_sequence
     }
 
-    pub fn current_file_number(&self) -> u64 {
-        self.current_file_number
-    }
-
     pub fn file_offset(&self) -> u64 {
         self.file_offset
     }
 
-    pub fn config(&self) -> &WalConfig {
-        &self.config
+    pub fn set_buffer_threshold(&mut self, threshold: usize) {
+        self.buffer_threshold = threshold;
+    }
+}
+
+impl Drop for WalManager {
+    fn drop(&mut self) {
+        let _ = self.flush_buffer();
     }
 }

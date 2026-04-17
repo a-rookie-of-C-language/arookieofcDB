@@ -55,6 +55,8 @@ fn test_wal_write_read_consistency() {
         manager.write_entry(key, value).unwrap();
     }
 
+    manager.flush_buffer().unwrap();
+
     let mut reader = WalReader::new(config).unwrap();
     let mut count = 0;
 
@@ -80,6 +82,8 @@ fn test_wal_multiple_files_read() {
         let value = format!("value{}", i);
         manager.write_entry(key.as_bytes(), value.as_bytes()).unwrap();
     }
+
+    manager.flush_buffer().unwrap();
 
     let mut reader = WalReader::new(config).unwrap();
     let mut count = 0;
@@ -208,6 +212,8 @@ fn test_wal_reader_reset() {
         let value = format!("value{}", i);
         manager.write_entry(key.as_bytes(), value.as_bytes()).unwrap();
     }
+
+    manager.flush_buffer().unwrap();
 
     let mut reader = WalReader::new(config).unwrap();
     
