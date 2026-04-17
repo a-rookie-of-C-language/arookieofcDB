@@ -6,3 +6,6 @@ pub mod ioc;
 pub use ioc::*;
 pub mod config;
 pub use config::*;
+pub mod storage;
+pub use storage::*;
+pub mod beans;

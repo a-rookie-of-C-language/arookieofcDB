@@ -6,6 +6,7 @@ pub enum CommandError {
     ExecuteError(String),
     InvalidArgs(String),
     NotFound(String),
+    InternalError(String),
 }
 
 pub type CommandResult<T> = Result<T, CommandError>;

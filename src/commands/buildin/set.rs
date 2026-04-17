@@ -1,5 +1,7 @@
 use crate::commands::base_args::{ArgsType, BaseArgs, ParsedArgs};
 use crate::commands::base_command::{BaseCommand, CommandError, CommandResult};
+use crate::ioc::application::Application;
+use crate::storage::db_engine::DbEngine;
 use macros::component;
 
 #[derive(Default)]
@@ -54,8 +56,14 @@ impl BaseCommand for SetCommand {
             .get_string("value")
             .ok_or_else(|| CommandError::InvalidArgs("missing 'value' argument".to_string()))?;
 
-        // TODO: 实际存储逻辑，通过 DAO 层操作
-        println!("SET {} = {}", key, value);
+        let db_engine = Application::get_bean("DbEngine")
+            .ok_or_else(|| CommandError::InternalError("DbEngine not found".to_string()))?;
+        
+        let engine = db_engine.downcast_ref::<DbEngine>()
+            .ok_or_else(|| CommandError::InternalError("Failed to cast to DbEngine".to_string()))?;
+
+        engine.set(key.as_bytes(), value.as_bytes())
+            .map_err(|e| CommandError::InternalError(format!("Failed to set key: {}", e)))?;
 
         Ok("OK".to_string())
     }

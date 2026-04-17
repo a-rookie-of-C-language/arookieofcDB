@@ -182,7 +182,7 @@ impl WalManager {
         Ok(())
     }
 
-    fn roll_file(&mut self) -> Result<(), WalError> {
+    pub fn roll_file(&mut self) -> Result<(), WalError> {
         self.current_file_number += 1;
         let mut new_file = Self::create_new_file(&self.config.wal_dir, self.current_file_number)?;
 
@@ -244,6 +244,20 @@ impl WalManager {
         self.file_offset += entry_bytes.len() as u64;
 
         Ok(seq)
+    }
+
+    pub fn write_raw_entry(&mut self, entry_bytes: &[u8]) -> Result<(), WalError> {
+        self.current_file
+            .write_all(entry_bytes)
+            .map_err(|e| WalError::IOError(e))?;
+        self.current_file
+            .sync_all()
+            .map_err(|e| WalError::IOError(e))?;
+
+        self.current_sequence += 1;
+        self.file_offset += entry_bytes.len() as u64;
+
+        Ok(())
     }
 
     pub fn write_checkpoint(&mut self) -> Result<u64, WalError> {
